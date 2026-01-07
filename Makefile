@@ -242,3 +242,44 @@ install-geth:
  			go install -v github.com/ethereum/go-ethereum/cmd/geth@$(shell jq -r .geth < versions.json); \
  			echo "Installed geth!"; true)
 .PHONY: install-geth
+
+# Development Environment Tools
+# =============================
+
+# Check development environment for required tools and configurations
+dev-check:
+	@echo "Checking development environment..."
+	@./ops/scripts/check-dev-environment.sh
+.PHONY: dev-check
+
+# Check development environment and output JSON for CI
+dev-check-ci:
+	@./ops/scripts/check-dev-environment.sh --json
+.PHONY: dev-check-ci
+
+# Check development environment and attempt to fix issues
+dev-check-fix:
+	@./ops/scripts/check-dev-environment.sh --fix
+.PHONY: dev-check-fix
+
+# Install pre-commit hook
+install-hooks:
+	@./ops/scripts/pre-commit.sh --install
+.PHONY: install-hooks
+
+# Run pre-commit checks manually
+pre-commit:
+	@./ops/scripts/pre-commit.sh
+.PHONY: pre-commit
+
+# Run quick pre-commit checks (no tests)
+pre-commit-quick:
+	@./ops/scripts/pre-commit.sh --quick
+.PHONY: pre-commit-quick
+
+# Developer onboarding: check environment and install hooks
+dev-setup: dev-check install-hooks
+	@echo ""
+	@echo "Development environment is ready!"
+	@echo "Pre-commit hooks have been installed."
+.PHONY: dev-setup
