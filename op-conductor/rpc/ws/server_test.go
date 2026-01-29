@@ -196,7 +196,7 @@ func setupTestServer(t *testing.T) (*Handler, *testEventTracker, *httptest.Serve
 	go handler.hub.run()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", handler.handleWebSocket)
+	mux.HandleFunc("/", handler.handleWebSocket)
 	server := httptest.NewServer(mux)
 
 	cleanup := func() {
@@ -526,4 +526,40 @@ func TestHubShutdown(t *testing.T) {
 	}
 
 	t.Log("Hub shutdown completed successfully")
+}
+
+// TestWebSocketMultiplePaths tests that WebSocket connections work on any path
+func TestWebSocketMultiplePaths(t *testing.T) {
+	handler, tracker, server, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	baseURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Test multiple paths: "/", "/ws", and "/flashblocks"
+	paths := []string{"/", "/ws", "/flashblocks"}
+
+	for _, path := range paths {
+		t.Run("path="+path, func(t *testing.T) {
+			wsURL := baseURL + path
+
+			client, err := newTestClient(ctx, wsURL)
+			if err != nil {
+				t.Fatalf("Failed to connect on path %s: %v", path, err)
+			}
+
+			// Wait for client registration
+			waitForClientCount(t, tracker, 1, 2*time.Second, "Client connected on "+path)
+
+			// Send broadcast message and verify receipt
+			testMessage := "test message for " + path
+			handler.BroadcastMessage([]byte(testMessage))
+			waitForMessage(t, client, testMessage, 2*time.Second, "Message on "+path)
+
+			// Disconnect client
+			client.Close()
+			waitForClientCount(t, tracker, 0, 2*time.Second, "Client disconnected from "+path)
+		})
+	}
 }

@@ -172,7 +172,7 @@ func (h *Handler) startWebSocketServer(_ context.Context) error {
 
 	// Create HTTP server with WebSocket endpoint
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", h.handleWebSocket)
+	mux.HandleFunc("/", h.handleWebSocket)
 
 	// Start HTTP server using reusable httputil server (supports port=0 and exposes Port())
 	addr := fmt.Sprintf(":%d", h.cfg.WebsocketServerPort)
