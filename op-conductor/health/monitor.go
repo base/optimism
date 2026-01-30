@@ -131,8 +131,8 @@ func (hm *SequencerHealthMonitor) Stop() error {
 	hm.log.Info("stopping health monitor")
 	if hm.cancel != nil {
 		hm.cancel()
+		hm.wg.Wait()
 	}
-	hm.wg.Wait()
 
 	hm.log.Info("health monitor stopped")
 	return nil
