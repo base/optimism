@@ -542,7 +542,7 @@ func TestWebSocketMultiplePaths(t *testing.T) {
 
 	for _, path := range paths {
 		t.Run("path="+path, func(t *testing.T) {
-			wsURL := baseURL + path
+			wsURL := fmt.Sprintf("%s%s", baseURL, path)
 
 			client, err := newTestClient(ctx, wsURL)
 			if err != nil {
