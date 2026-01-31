@@ -15,8 +15,13 @@ jobs:
     if: github.repository == 'ethereum-optimism/optimism'
     runs-on: ubuntu-latest
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9 # v2.14.1
+        with:
+          egress-policy: audit
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           submodules: recursive
           fetch-depth: 0
@@ -35,7 +40,7 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish snapshots
-        uses: seek-oss/changesets-snapshot@v0
+        uses: seek-oss/changesets-snapshot@7a1b807af2b3c2c7141284c93ceeb5b5aef015dd # v0.2.0
         with:
           pre-publish: pnpm nx run-many --target=build --skip-nx-cache
         env:
