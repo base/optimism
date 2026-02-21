@@ -13,7 +13,12 @@ jobs:
     container:
       image: us-docker.pkg.dev/oplabs-tools-artifacts/images/ci-builder:v0.49.0
     steps:
-      - uses: actions/checkout@v4
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       # Workaround to prevent slither-action from trying to install JS deps.
       # Without this step, it detects the `package.json`, and since there is no
@@ -23,7 +28,7 @@ jobs:
         run: rm packages/contracts-bedrock/package.json
 
       - name: Run Slither
-        uses: crytic/slither-action@v0.4.0
+        uses: crytic/slither-action@f197989dea5b53e986d0f88c60a034ddd77ec9a8 # v0.4.0
         id: slither
         with:
           target: packages/contracts-bedrock
@@ -33,7 +38,7 @@ jobs:
           slither-args: --triage-database packages/contracts-bedrock/slither.db.json
 
       - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@45580472a5bb82c4681c4ac726cfdb60060c2ee1 # v3.32.4
         if: always()
         with:
           sarif_file: ${{ steps.slither.outputs.sarif }}
