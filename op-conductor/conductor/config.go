@@ -10,8 +10,6 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/ethereum-optimism/optimism/op-conductor/flags"
-	opnode "github.com/ethereum-optimism/optimism/op-node"
-	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
 	"github.com/ethereum-optimism/optimism/op-service/oppprof"
@@ -89,9 +87,6 @@ type Config struct {
 	// HealthCheck is the health check configuration.
 	HealthCheck HealthCheckConfig
 
-	// RollupCfg is the rollup config.
-	RollupCfg rollup.Config
-
 	// RPCEnableProxy is true if the sequencer RPC proxy should be enabled.
 	RPCEnableProxy bool
 
@@ -137,9 +132,6 @@ func (c *Config) Check() error {
 	if err := c.HealthCheck.Check(); err != nil {
 		return errors.Wrap(err, "invalid health check config")
 	}
-	if err := c.RollupCfg.Check(); err != nil {
-		return errors.Wrap(err, "invalid rollup config")
-	}
 	if err := c.MetricsConfig.Check(); err != nil {
 		return errors.Wrap(err, "invalid metrics config")
 	}
@@ -156,11 +148,6 @@ func (c *Config) Check() error {
 func NewConfig(ctx *cli.Context, log log.Logger) (*Config, error) {
 	if err := flags.CheckRequired(ctx); err != nil {
 		return nil, errors.Wrap(err, "missing required flags")
-	}
-
-	rollupCfg, err := opnode.NewRollupConfigFromCLI(log, ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to load rollup config")
 	}
 
 	executionP2pRpcUrl := ctx.String(flags.HealthcheckExecutionP2pRPCUrl.Name)
@@ -206,7 +193,6 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*Config, error) {
 			RollupBoostPartialHealthinessToleranceLimit:           ctx.Uint64(flags.HealthCheckRollupBoostPartialHealthinessToleranceLimit.Name),
 			RollupBoostPartialHealthinessToleranceIntervalSeconds: ctx.Uint64(flags.HealthCheckRollupBoostPartialHealthinessToleranceIntervalSeconds.Name),
 		},
-		RollupCfg:           *rollupCfg,
 		RPCEnableProxy:      ctx.Bool(flags.RPCEnableProxy.Name),
 		RollupBoostWsURL:    ctx.String(flags.RollupBoostWsURL.Name),
 		WebsocketServerPort: ctx.Int(flags.WebsocketServerPort.Name),

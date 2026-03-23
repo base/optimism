@@ -46,24 +46,28 @@ func L2ClientDefaultConfig(config *rollup.Config, trustRPC bool) *L2ClientConfig
 
 func L2ClientSimpleConfig(config *rollup.Config, trustRPC bool, span, fullSpan int) *L2ClientConfig {
 	return &L2ClientConfig{
-		EthClientConfig: EthClientConfig{
-			// receipts and transactions are cached per block
-			ReceiptsCacheSize:     span,
-			TransactionsCacheSize: span,
-			HeadersCacheSize:      span,
-			PayloadsCacheSize:     span,
-			MaxRequestsPerBatch:   20,
-			MaxConcurrentRequests: 10,
-			BlockRefsCacheSize:    span,
-			TrustRPC:              trustRPC,
-			MustBePostMerge:       true,
-			RPCProviderKind:       RPCKindStandard,
-			MethodResetDuration:   time.Minute,
-		},
+		EthClientConfig: *EthClientConfigWithSpan(trustRPC, span),
 		// Not bounded by span, to cover find-sync-start range fully for speedy recovery after errors.
 		L2BlockRefsCacheSize: fullSpan,
 		L1ConfigsCacheSize:   span,
 		RollupCfg:            config,
+	}
+}
+
+func EthClientConfigWithSpan(trustRPC bool, span int) *EthClientConfig {
+	return &EthClientConfig{
+		// receipts and transactions are cached per block
+		ReceiptsCacheSize:     span,
+		TransactionsCacheSize: span,
+		HeadersCacheSize:      span,
+		PayloadsCacheSize:     span,
+		MaxRequestsPerBatch:   20,
+		MaxConcurrentRequests: 10,
+		BlockRefsCacheSize:    span,
+		TrustRPC:              trustRPC,
+		MustBePostMerge:       true,
+		RPCProviderKind:       RPCKindStandard,
+		MethodResetDuration:   time.Minute,
 	}
 }
 

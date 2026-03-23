@@ -232,7 +232,6 @@ func setupConductor(
 			UnsafeInterval: 30,
 			SafeInterval:   30,
 		},
-		RollupCfg:      rollupCfg,
 		RPCEnableProxy: true,
 		LogConfig: oplog.CLIConfig{
 			Level: log.LevelDebug,
