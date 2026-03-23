@@ -41,6 +41,9 @@ var (
 	ErrNoUnsafeHead       = errors.New("no unsafe head")
 )
 
+// clientCacheSize is the number of blocks that the client keeps a cache for
+const clientCacheSize = 1000
+
 // New creates a new OpConductor instance.
 func New(ctx context.Context, cfg *Config, log log.Logger, version string) (*OpConductor, error) {
 	return NewOpConductor(ctx, cfg, log, metrics.NewMetrics(), version, nil, nil, nil)
@@ -132,9 +135,10 @@ func (c *OpConductor) initSequencerControl(ctx context.Context) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to create geth rpc client")
 	}
-	execCfg := sources.L2ClientDefaultConfig(&c.cfg.RollupCfg, true)
 	// TODO: Add metrics tracer here. tracked by https://github.com/ethereum-optimism/protocol-quest/issues/45
-	exec, err := sources.NewEthClient(ec, c.log, nil, &execCfg.EthClientConfig)
+
+	// use 1000 blocks as the span since this is the max value, and generally what is used
+	exec, err := sources.NewEthClient(ec, c.log, nil, sources.EthClientConfigWithSpan(true, clientCacheSize))
 	if err != nil {
 		return errors.Wrap(err, "failed to create geth client")
 	}
@@ -181,7 +185,6 @@ func (c *OpConductor) initConsensus(ctx context.Context) error {
 		ListenPort:         c.cfg.ConsensusPort,
 		StorageDir:         c.cfg.RaftStorageDir,
 		Bootstrap:          c.cfg.RaftBootstrap,
-		RollupCfg:          &c.cfg.RollupCfg,
 		SnapshotInterval:   c.cfg.RaftSnapshotInterval,
 		SnapshotThreshold:  c.cfg.RaftSnapshotThreshold,
 		TrailingLogs:       c.cfg.RaftTrailingLogs,
@@ -261,7 +264,6 @@ func (c *OpConductor) initHealthMonitor(ctx context.Context) error {
 		c.cfg.HealthCheck.SafeInterval,
 		c.cfg.HealthCheck.MinPeerCount,
 		c.cfg.HealthCheck.SafeEnabled,
-		&c.cfg.RollupCfg,
 		node,
 		p2p,
 		supervisor,

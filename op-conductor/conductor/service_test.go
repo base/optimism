@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,14 +24,12 @@ import (
 	"github.com/ethereum-optimism/optimism/op-conductor/health"
 	healthmocks "github.com/ethereum-optimism/optimism/op-conductor/health/mocks"
 	"github.com/ethereum-optimism/optimism/op-conductor/metrics"
-	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/testlog"
 	"github.com/ethereum-optimism/optimism/op-service/testutils"
 )
 
 func mockConfig(t *testing.T) Config {
-	now := uint64(time.Now().Unix())
 	return Config{
 		ConsensusAddr:  "127.0.0.1",
 		ConsensusPort:  0,
@@ -47,37 +44,6 @@ func mockConfig(t *testing.T) Config {
 			UnsafeInterval: 3,
 			SafeInterval:   5,
 			MinPeerCount:   1,
-		},
-		RollupCfg: rollup.Config{
-			Genesis: rollup.Genesis{
-				L1: eth.BlockID{
-					Hash:   [32]byte{1, 2},
-					Number: 100,
-				},
-				L2: eth.BlockID{
-					Hash:   [32]byte{2, 3},
-					Number: 0,
-				},
-				L2Time: now,
-				SystemConfig: eth.SystemConfig{
-					BatcherAddr: [20]byte{1},
-					Overhead:    [32]byte{1},
-					Scalar:      [32]byte{1},
-					GasLimit:    30000000,
-				},
-			},
-			BlockTime:               2,
-			MaxSequencerDrift:       600,
-			SeqWindowSize:           3600,
-			ChannelTimeoutBedrock:   300,
-			L1ChainID:               big.NewInt(1),
-			L2ChainID:               big.NewInt(2),
-			RegolithTime:            &now,
-			CanyonTime:              &now,
-			BatchInboxAddress:       [20]byte{1, 2},
-			DepositContractAddress:  [20]byte{2, 3},
-			L1SystemConfigAddress:   [20]byte{3, 4},
-			ProtocolVersionsAddress: [20]byte{4, 5},
 		},
 		RPCEnableProxy: false,
 	}
