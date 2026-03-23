@@ -19,14 +19,15 @@ import (
 const (
 	// reconnectDelay is the delay between reconnection attempts
 	reconnectDelay = 5 * time.Second
-	// pingInterval is how often to send pings to keep connections alive
-	pingInterval = 15 * time.Second
-	// pongTimeout is how long to wait for a pong response
-	pongTimeout = 10 * time.Second
 	// writeTimeout for all message writes
 	writeTimeout = 5 * time.Second
 	// send channel buffer size
 	sendChannelBufferSize = 256
+	// defaultPingInterval is how often to send keepalive pings on WebSocket connections.
+	defaultPingInterval = 15 * time.Second
+	// defaultPongTimeout is how long to wait for a pong response before treating
+	// the connection as stale.
+	defaultPongTimeout = 10 * time.Second
 )
 
 // FlashblockHandler manages WebSocket connections for flashblocks
@@ -61,6 +62,8 @@ type Handler struct {
 	httpServer          *httputil.HTTPServer
 	hub                 *Hub
 	boundPort           int
+	pingInterval        time.Duration
+	pongTimeout         time.Duration
 }
 
 // NewHandler creates a new flashblocks handler
@@ -76,10 +79,12 @@ func NewHandler(cfg Config, log log.Logger, isLeaderFn func(context.Context) boo
 
 	// Initialize the handler
 	handler := &Handler{
-		cfg:        cfg,
-		log:        log,
-		isLeaderFn: isLeaderFn,
-		metrics:    m,
+		cfg:          cfg,
+		log:          log,
+		isLeaderFn:   isLeaderFn,
+		metrics:      m,
+		pingInterval: defaultPingInterval,
+		pongTimeout:  defaultPongTimeout,
 	}
 
 	// Try to establish initial connection to rollup boost WebSocket
@@ -172,7 +177,7 @@ func (h *Handler) startWebSocketServer(_ context.Context) error {
 
 	// Create HTTP server with WebSocket endpoint
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", h.handleWebSocket)
+	mux.HandleFunc("/", h.handleWebSocket)
 
 	// Start HTTP server using reusable httputil server (supports port=0 and exposes Port())
 	addr := fmt.Sprintf(":%d", h.cfg.WebsocketServerPort)
@@ -215,6 +220,7 @@ func (h *Handler) listenToRollupBoost(ctx context.Context) {
 				time.Sleep(500 * time.Millisecond)
 				continue
 			}
+
 			// Try to connect if not connected indefinitely
 			if h.rollupBoostConn == nil {
 				h.log.Info("reconnecting to rollup boost WebSocket", "url", h.cfg.RollupBoostWsURL)
@@ -229,7 +235,6 @@ func (h *Handler) listenToRollupBoost(ctx context.Context) {
 				if err != nil {
 					h.log.Warn("failed to connect to rollup boost WebSocket, will retry",
 						"err", err, "retryIn", reconnectDelay)
-					// add a metric for the number of times we've tried to connect
 					h.metrics.RecordRollupBoostConnectionAttempts(false, h.cfg.RollupBoostWsURL)
 					time.Sleep(reconnectDelay)
 					continue
@@ -238,12 +243,14 @@ func (h *Handler) listenToRollupBoost(ctx context.Context) {
 				h.rollupBoostConn = conn
 				h.log.Info("successfully connected to rollup boost WebSocket")
 				h.metrics.RecordRollupBoostConnectionAttempts(true, h.cfg.RollupBoostWsURL)
+
+				// Start keepalive pings on the upstream connection.
+				// If the ping fails (stale TCP connection), close the conn
+				// so the read below errors out and triggers reconnection.
+				go h.pingUpstream(ctx)
 			}
 
-			// Read with timeout
-			readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			_, message, err := h.rollupBoostConn.Read(readCtx)
-			cancel()
+			_, message, err := h.rollupBoostConn.Read(ctx)
 
 			if err != nil {
 				h.log.Warn("error reading from rollup boost WebSocket", "err", err)
@@ -256,6 +263,31 @@ func (h *Handler) listenToRollupBoost(ctx context.Context) {
 			}
 
 			h.handleRollupBoostMessage(ctx, message)
+		}
+	}
+}
+
+func (h *Handler) pingUpstream(ctx context.Context) {
+	ticker := time.NewTicker(h.pingInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			conn := h.rollupBoostConn
+			if conn == nil {
+				return
+			}
+			pingCtx, cancel := context.WithTimeout(ctx, h.pongTimeout)
+			err := conn.Ping(pingCtx)
+			cancel()
+			if err != nil {
+				h.log.Warn("upstream ping failed, closing connection for reconnect", "err", err)
+				conn.Close(websocket.StatusInternalError, "ping timeout")
+				return
+			}
 		}
 	}
 }

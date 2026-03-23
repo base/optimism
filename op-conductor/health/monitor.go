@@ -126,8 +126,10 @@ func (hm *SequencerHealthMonitor) Start(ctx context.Context) error {
 // Stop implements HealthMonitor.
 func (hm *SequencerHealthMonitor) Stop() error {
 	hm.log.Info("stopping health monitor")
-	hm.cancel()
-	hm.wg.Wait()
+	if hm.cancel != nil {
+		hm.cancel()
+		hm.wg.Wait()
+	}
 
 	hm.log.Info("health monitor stopped")
 	return nil
