@@ -184,12 +184,15 @@ func (c *OpConductor) initConsensus(ctx context.Context) error {
 		ListenAddr:         c.cfg.ConsensusAddr,
 		ListenPort:         c.cfg.ConsensusPort,
 		StorageDir:         c.cfg.RaftStorageDir,
+		Backend:            c.cfg.RaftBackend,
+		MDBMaxSize:         c.cfg.RaftMDBMaxSize,
 		Bootstrap:          c.cfg.RaftBootstrap,
 		SnapshotInterval:   c.cfg.RaftSnapshotInterval,
 		SnapshotThreshold:  c.cfg.RaftSnapshotThreshold,
 		TrailingLogs:       c.cfg.RaftTrailingLogs,
 		HeartbeatTimeout:   c.cfg.RaftHeartbeatTimeout,
 		LeaderLeaseTimeout: c.cfg.RaftLeaderLeaseTimeout,
+		Metrics:            c.metrics,
 	}
 	cons, err := consensus.NewRaftConsensus(c.log, raftConsensusConfig)
 	if err != nil {

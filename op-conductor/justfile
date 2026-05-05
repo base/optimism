@@ -10,7 +10,8 @@ _LDFLAGSSTRING := "'" + trim(
 BINARY := "./bin/op-conductor"
 
 # Build op-conductor binary
-op-conductor: (go_build BINARY "./cmd" "-ldflags" _LDFLAGSSTRING)
+op-conductor:
+    env GO111MODULE=on GOOS={{TARGETOS}} GOARCH={{TARGETARCH}} CGO_ENABLED=1 go build -v {{_GORACE_FLAG}} {{_EXTRALDFLAGS}} -ldflags {{_LDFLAGSSTRING}} -o {{BINARY}} ./cmd
 
 # Clean build artifacts
 clean:

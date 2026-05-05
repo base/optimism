@@ -6,11 +6,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/raft"
 	boltdb "github.com/hashicorp/raft-boltdb/v2"
+	raftmdb "github.com/hashicorp/raft-mdb"
 	"github.com/pkg/errors"
 
 	"github.com/ethereum-optimism/optimism/op-service/eth"
@@ -18,14 +21,24 @@ import (
 
 const defaultTimeout = 5 * time.Second
 
+const (
+	RaftBackendBbolt      = "bbolt"
+	RaftBackendMDB        = "mdb"
+	DefaultRaftBackend    = RaftBackendBbolt
+	DefaultRaftMDBMaxSize = 1 << 30
+)
+
 var _ Consensus = (*RaftConsensus)(nil)
 
 // RaftConsensus implements Consensus using raft protocol.
 type RaftConsensus struct {
 	log log.Logger
 
+	metrics ConsensusMetrics
+
 	serverID raft.ServerID
 	r        *raft.Raft
+	closeFn  func() error
 
 	transport *raft.NetworkTransport
 	// advertisedAddr is the host & port to contact this server.
@@ -52,12 +65,31 @@ type RaftConsensusConfig struct {
 	ListenAddr string
 
 	StorageDir         string
+	Backend            string
+	MDBMaxSize         uint64
 	Bootstrap          bool
 	SnapshotInterval   time.Duration
 	SnapshotThreshold  uint64
 	TrailingLogs       uint64
 	HeartbeatTimeout   time.Duration
 	LeaderLeaseTimeout time.Duration
+
+	// Metrics collects sub-operation timing data for the commit path.
+	// If nil, no metrics are recorded.
+	Metrics ConsensusMetrics
+
+	// Transport allows injecting a custom raft.NetworkTransport for benchmarks.
+	// If nil, a default TCP transport is created.
+	Transport *raft.NetworkTransport
+
+	// Logger overrides raft's internal logger.
+	Logger hclog.Logger
+}
+
+type raftStores struct {
+	logStore    raft.LogStore
+	stableStore raft.StableStore
+	closeFn     func() error
 }
 
 // checkTCPPortOpen attempts to connect to the specified address and returns an error if the connection fails.
@@ -79,6 +111,9 @@ func NewRaftConsensus(log log.Logger, cfg *RaftConsensusConfig) (*RaftConsensus,
 	rc.HeartbeatTimeout = cfg.HeartbeatTimeout
 	rc.LeaderLeaseTimeout = cfg.LeaderLeaseTimeout
 	rc.LocalID = raft.ServerID(cfg.ServerID)
+	if cfg.Logger != nil {
+		rc.Logger = cfg.Logger
+	}
 
 	baseDir := filepath.Join(cfg.StorageDir, cfg.ServerID)
 	if _, err := os.Stat(baseDir); os.IsNotExist(err) {
@@ -87,21 +122,16 @@ func NewRaftConsensus(log log.Logger, cfg *RaftConsensusConfig) (*RaftConsensus,
 		}
 	}
 
-	var err error
-	logStorePath := filepath.Join(baseDir, "raft-log.db")
-	logStore, err := boltdb.NewBoltStore(logStorePath)
+	stores, err := newRaftStores(baseDir, cfg)
 	if err != nil {
-		return nil, fmt.Errorf(`boltdb.NewBoltStore(%q): %w`, logStorePath, err)
-	}
-
-	stableStorePath := filepath.Join(baseDir, "raft-stable.db")
-	stableStore, err := boltdb.NewBoltStore(stableStorePath)
-	if err != nil {
-		return nil, fmt.Errorf(`boltdb.NewBoltStore(%q): %w`, stableStorePath, err)
+		return nil, err
 	}
 
 	snapshotStore, err := raft.NewFileSnapshotStoreWithLogger(baseDir, 1, rc.Logger)
 	if err != nil {
+		if stores.closeFn != nil {
+			_ = stores.closeFn()
+		}
 		return nil, fmt.Errorf(`raft.NewFileSnapshotStore(%q): %w`, baseDir, err)
 	}
 
@@ -118,23 +148,38 @@ func NewRaftConsensus(log log.Logger, cfg *RaftConsensusConfig) (*RaftConsensus,
 			"adIP", x.IP, "adPort", x.Port, "adZone", x.Zone)
 	}
 
-	bindAddr := fmt.Sprintf("%s:%d", cfg.ListenAddr, cfg.ListenPort)
-	log.Info("Binding raft server to network transport", "listenAddr", bindAddr)
+	var transport *raft.NetworkTransport
+	if cfg.Transport != nil {
+		transport = cfg.Transport
+		log.Info("Using injected raft transport", "addr", transport.LocalAddr())
+	} else {
+		bindAddr := fmt.Sprintf("%s:%d", cfg.ListenAddr, cfg.ListenPort)
+		log.Info("Binding raft server to network transport", "listenAddr", bindAddr)
 
-	maxConnPool := 10
-	timeout := 5 * time.Second
+		maxConnPool := 10
+		timeout := 5 * time.Second
 
-	// When advertiseAddr == nil, the transport will use the local address that it is bound to.
-	transport, err := raft.NewTCPTransportWithLogger(bindAddr, advertiseAddr, maxConnPool, timeout, rc.Logger)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create raft tcp transport")
+		// When advertiseAddr == nil, the transport will use the local address that it is bound to.
+		transport, err = raft.NewTCPTransportWithLogger(bindAddr, advertiseAddr, maxConnPool, timeout, rc.Logger)
+		if err != nil {
+			if stores.closeFn != nil {
+				_ = stores.closeFn()
+			}
+			return nil, errors.Wrap(err, "failed to create raft tcp transport")
+		}
+		log.Info("Raft server network transport is up", "addr", transport.LocalAddr())
 	}
-	log.Info("Raft server network transport is up", "addr", transport.LocalAddr())
 
-	fsm := NewUnsafeHeadTracker(log)
+	fsm := NewUnsafeHeadTracker(log, cfg.Metrics)
 
-	r, err := raft.NewRaft(rc, fsm, logStore, stableStore, snapshotStore, transport)
+	r, err := raft.NewRaft(rc, fsm, stores.logStore, stores.stableStore, snapshotStore, transport)
 	if err != nil {
+		if stores.closeFn != nil {
+			_ = stores.closeFn()
+		}
+		if cfg.Transport == nil && transport != nil {
+			_ = transport.Close()
+		}
 		log.Error("failed to create raft", "err", err)
 		return nil, errors.Wrap(err, "failed to create raft")
 	}
@@ -166,6 +211,12 @@ func NewRaftConsensus(log log.Logger, cfg *RaftConsensusConfig) (*RaftConsensus,
 			if errors.Is(err, raft.ErrCantBootstrap) {
 				log.Warn("Raft cluster already exists, skipping bootstrap")
 			} else {
+				if stores.closeFn != nil {
+					_ = stores.closeFn()
+				}
+				if cfg.Transport == nil && transport != nil {
+					_ = transport.Close()
+				}
 				return nil, errors.Wrap(err, "failed to bootstrap raft cluster")
 			}
 		}
@@ -173,11 +224,94 @@ func NewRaftConsensus(log log.Logger, cfg *RaftConsensusConfig) (*RaftConsensus,
 
 	return &RaftConsensus{
 		log:           log,
+		metrics:       cfg.Metrics,
 		r:             r,
+		closeFn:       stores.closeFn,
 		serverID:      raft.ServerID(cfg.ServerID),
 		unsafeTracker: fsm,
 		transport:     transport,
 	}, err
+}
+
+func ValidRaftBackend(backend string) bool {
+	switch normalizeRaftBackend(backend) {
+	case RaftBackendBbolt, RaftBackendMDB:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeRaftBackend(backend string) string {
+	if backend == "" {
+		return DefaultRaftBackend
+	}
+	return strings.ToLower(backend)
+}
+
+func newRaftStores(baseDir string, cfg *RaftConsensusConfig) (*raftStores, error) {
+	switch normalizeRaftBackend(cfg.Backend) {
+	case RaftBackendBbolt:
+		return newBoltRaftStores(baseDir, cfg.Metrics)
+	case RaftBackendMDB:
+		return newMDBRaftStores(baseDir, cfg.Metrics, cfg.MDBMaxSize)
+	default:
+		return nil, fmt.Errorf("unsupported raft backend %q", cfg.Backend)
+	}
+}
+
+func newBoltRaftStores(baseDir string, metrics ConsensusMetrics) (*raftStores, error) {
+	logStorePath := filepath.Join(baseDir, "raft-log.db")
+	logStore, err := boltdb.NewBoltStore(logStorePath)
+	if err != nil {
+		return nil, fmt.Errorf(`boltdb.NewBoltStore(%q): %w`, logStorePath, err)
+	}
+
+	stableStorePath := filepath.Join(baseDir, "raft-stable.db")
+	stableStore, err := boltdb.NewBoltStore(stableStorePath)
+	if err != nil {
+		_ = logStore.Close()
+		return nil, fmt.Errorf(`boltdb.NewBoltStore(%q): %w`, stableStorePath, err)
+	}
+
+	return &raftStores{
+		logStore:    wrapInstrumentedLogStore(logStore, metrics),
+		stableStore: stableStore,
+		closeFn: func() error {
+			if err := stableStore.Close(); err != nil {
+				_ = logStore.Close()
+				return err
+			}
+			return logStore.Close()
+		},
+	}, nil
+}
+
+func newMDBRaftStores(baseDir string, metrics ConsensusMetrics, maxSize uint64) (*raftStores, error) {
+	if maxSize == 0 {
+		maxSize = DefaultRaftMDBMaxSize
+	}
+
+	store, err := raftmdb.NewMDBStoreWithSize(baseDir, maxSize)
+	if err != nil {
+		return nil, fmt.Errorf(`raftmdb.NewMDBStoreWithSize(%q, %d): %w`, baseDir, maxSize, err)
+	}
+
+	return &raftStores{
+		logStore:    wrapInstrumentedLogStore(store, metrics),
+		stableStore: store,
+		closeFn:     store.Close,
+	}, nil
+}
+
+func wrapInstrumentedLogStore(store raft.LogStore, metrics ConsensusMetrics) raft.LogStore {
+	if metrics == nil {
+		return store
+	}
+	return &instrumentedLogStore{
+		LogStore: store,
+		metrics:  metrics,
+	}
 }
 
 // Addr returns the address to contact this raft consensus server.
@@ -288,6 +422,12 @@ func (rc *RaftConsensus) Shutdown() error {
 		rc.log.Error("failed to shutdown raft", "err", err)
 		return err
 	}
+	if rc.closeFn != nil {
+		if err := rc.closeFn(); err != nil {
+			rc.log.Error("failed to close raft stores", "err", err)
+			return err
+		}
+	}
 	return nil
 }
 
@@ -296,17 +436,49 @@ func (rc *RaftConsensus) CommitUnsafePayload(payload *eth.ExecutionPayloadEnvelo
 	rc.log.Debug("committing unsafe payload", "number", uint64(payload.ExecutionPayload.BlockNumber), "hash", payload.ExecutionPayload.BlockHash.Hex())
 
 	var buf bytes.Buffer
+	marshalStart := time.Now()
 	if _, err := payload.MarshalSSZ(&buf); err != nil {
 		return errors.Wrap(err, "failed to marshal payload envelope")
 	}
+	marshalDur := time.Since(marshalStart)
 
+	applyStart := time.Now()
 	f := rc.r.Apply(buf.Bytes(), defaultTimeout)
 	if err := f.Error(); err != nil {
 		return errors.Wrap(err, "failed to apply payload envelope")
 	}
+	applyDur := time.Since(applyStart)
+
+	if rc.metrics != nil {
+		rc.metrics.RecordCommitDuration(marshalDur.Seconds(), applyDur.Seconds())
+		rc.metrics.RecordCommitPayloadSize(float64(buf.Len()))
+	}
 	rc.log.Debug("unsafe payload committed", "number", uint64(payload.ExecutionPayload.BlockNumber), "hash", payload.ExecutionPayload.BlockHash.Hex())
 
 	return nil
+}
+
+type instrumentedLogStore struct {
+	raft.LogStore
+	metrics ConsensusMetrics
+}
+
+func (s *instrumentedLogStore) StoreLog(logEntry *raft.Log) error {
+	start := time.Now()
+	err := s.LogStore.StoreLog(logEntry)
+	if s.metrics != nil {
+		s.metrics.RecordLogStoreDuration(time.Since(start).Seconds())
+	}
+	return err
+}
+
+func (s *instrumentedLogStore) StoreLogs(logEntries []*raft.Log) error {
+	start := time.Now()
+	err := s.LogStore.StoreLogs(logEntries)
+	if s.metrics != nil {
+		s.metrics.RecordLogStoreDuration(time.Since(start).Seconds())
+	}
+	return err
 }
 
 // LatestUnsafePayload implements Consensus, it returns the latest unsafe payload from FSM in a strongly consistent fashion.
