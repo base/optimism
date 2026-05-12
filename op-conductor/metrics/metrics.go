@@ -3,6 +3,7 @@ package metrics
 import (
 	"strconv"
 
+	"github.com/ethereum-optimism/optimism/op-conductor/consensus"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
 	"github.com/prometheus/client_golang/prometheus"
@@ -22,10 +23,12 @@ type Metricer interface {
 	RecordRollupBoostConnectionAttempts(success bool, source string)
 	RecordWebSocketClientCount(count int)
 	opmetrics.RPCMetricer
+	consensus.ConsensusMetrics
 }
 
 // Metrics implementation must implement RegistryMetricer to allow the metrics server to work.
 var _ opmetrics.RegistryMetricer = (*Metrics)(nil)
+var _ consensus.ConsensusMetrics = (*Metrics)(nil)
 
 type Metrics struct {
 	ns       string
@@ -46,6 +49,12 @@ type Metrics struct {
 
 	loopExecutionTime prometheus.Histogram
 	webSocketClients  prometheus.Gauge
+
+	commitMarshalDuration   prometheus.Histogram
+	commitRaftApplyDuration prometheus.Histogram
+	commitPayloadSize       prometheus.Histogram
+	fsmApplyDuration        prometheus.Histogram
+	logStoreDuration        prometheus.Histogram
 }
 
 func (m *Metrics) Registry() *prometheus.Registry {
@@ -122,6 +131,36 @@ func NewMetrics() *Metrics {
 			Name:      "websocket_clients_connected",
 			Help:      "Number of WebSocket clients currently connected to the hub",
 		}),
+		commitMarshalDuration: factory.NewHistogram(prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Name:      "commit_marshal_duration_seconds",
+			Help:      "Time (in seconds) to SSZ-marshal the payload in CommitUnsafePayload",
+			Buckets:   []float64{.0001, .00025, .0005, .001, .0025, .005, .01, .025},
+		}),
+		commitRaftApplyDuration: factory.NewHistogram(prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Name:      "commit_raft_apply_duration_seconds",
+			Help:      "Time (in seconds) for raft Apply (replication, storage, and FSM apply) in CommitUnsafePayload",
+			Buckets:   []float64{.001, .0025, .005, .01, .025, .05, .1, .25, .5},
+		}),
+		commitPayloadSize: factory.NewHistogram(prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Name:      "commit_payload_size_bytes",
+			Help:      "SSZ-encoded payload size in bytes",
+			Buckets:   []float64{1000, 10000, 50000, 100000, 500000, 1000000, 1500000, 2000000, 2500000},
+		}),
+		fsmApplyDuration: factory.NewHistogram(prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Name:      "fsm_apply_duration_seconds",
+			Help:      "Time (in seconds) spent in FSM Apply (SSZ decode plus unsafe-head update)",
+			Buckets:   []float64{.0001, .00025, .0005, .001, .0025, .005, .01, .025},
+		}),
+		logStoreDuration: factory.NewHistogram(prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Name:      "raft_log_store_duration_seconds",
+			Help:      "Time (in seconds) spent writing raft log entries to the underlying log store",
+			Buckets:   []float64{.0001, .00025, .0005, .001, .0025, .005, .01, .025, .05},
+		}),
 	}
 }
 
@@ -182,4 +221,21 @@ func (m *Metrics) RecordRollupBoostConnectionAttempts(success bool, source strin
 // RecordWebSocketClientCount sets the current number of WebSocket clients connected.
 func (m *Metrics) RecordWebSocketClientCount(count int) {
 	m.webSocketClients.Set(float64(count))
+}
+
+func (m *Metrics) RecordCommitDuration(marshalSec, raftApplySec float64) {
+	m.commitMarshalDuration.Observe(marshalSec)
+	m.commitRaftApplyDuration.Observe(raftApplySec)
+}
+
+func (m *Metrics) RecordCommitPayloadSize(payloadBytes float64) {
+	m.commitPayloadSize.Observe(payloadBytes)
+}
+
+func (m *Metrics) RecordFSMApplyDuration(seconds float64) {
+	m.fsmApplyDuration.Observe(seconds)
+}
+
+func (m *Metrics) RecordLogStoreDuration(seconds float64) {
+	m.logStoreDuration.Observe(seconds)
 }

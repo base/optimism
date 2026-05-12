@@ -9,6 +9,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 
+	"github.com/ethereum-optimism/optimism/op-conductor/consensus"
 	"github.com/ethereum-optimism/optimism/op-conductor/flags"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
@@ -35,6 +36,12 @@ type Config struct {
 
 	// RaftStorageDir is the directory to store raft data.
 	RaftStorageDir string
+
+	// RaftBackend selects the local raft storage backend.
+	RaftBackend string
+
+	// RaftMDBMaxSize is the LMDB map size used by the mdb raft backend.
+	RaftMDBMaxSize uint64
 
 	// RaftBootstrap is true if this node should bootstrap a new raft cluster.
 	RaftBootstrap bool
@@ -117,6 +124,16 @@ func (c *Config) Check() error {
 	if c.RaftStorageDir == "" {
 		return fmt.Errorf("missing raft storage directory")
 	}
+	raftBackend := c.RaftBackend
+	if raftBackend == "" {
+		raftBackend = consensus.DefaultRaftBackend
+	}
+	if !consensus.ValidRaftBackend(raftBackend) {
+		return fmt.Errorf("invalid raft backend %q", c.RaftBackend)
+	}
+	if raftBackend == consensus.RaftBackendMDB && c.RaftMDBMaxSize == 0 {
+		return fmt.Errorf("invalid raft mdb max size: must be greater than zero")
+	}
 	if c.NodeRPC == "" {
 		return fmt.Errorf("missing node RPC")
 	}
@@ -167,6 +184,8 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*Config, error) {
 		RaftBootstrap:                 ctx.Bool(flags.RaftBootstrap.Name),
 		RaftServerID:                  ctx.String(flags.RaftServerID.Name),
 		RaftStorageDir:                ctx.String(flags.RaftStorageDir.Name),
+		RaftBackend:                   ctx.String(flags.RaftBackend.Name),
+		RaftMDBMaxSize:                ctx.Uint64(flags.RaftMDBMaxSize.Name),
 		RaftSnapshotInterval:          ctx.Duration(flags.RaftSnapshotInterval.Name),
 		RaftSnapshotThreshold:         ctx.Uint64(flags.RaftSnapshotThreshold.Name),
 		RaftTrailingLogs:              ctx.Uint64(flags.RaftTrailingLogs.Name),

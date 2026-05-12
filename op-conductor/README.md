@@ -20,6 +20,16 @@ The design will provide below guarantees:
 
 For configuration and runbook, please refer to [RUNBOOK.md](./RUNBOOK.md)
 
+For latency and benchmarking notes around large unsafe payload commits, see [PERFORMANCE.md](./PERFORMANCE.md).
+
+The raft storage backend is configurable with `OP_CONDUCTOR_RAFT_BACKEND`. `bbolt` remains the default for rollout safety, `mdb` enables the fastest validated log/stable store, and the community-backed `pebble`, `badger`, and `leveldb` options are available for devnet and benchmarking experiments. The default raft retention settings are tuned for conductor's latest-head-only FSM:
+
+- `OP_CONDUCTOR_RAFT_SNAPSHOT_INTERVAL=1s`
+- `OP_CONDUCTOR_RAFT_SNAPSHOT_THRESHOLD=48`
+- `OP_CONDUCTOR_RAFT_TRAILING_LOGS=32`
+
+If you switch backends, use a fresh per-node storage root such as `/data/raft-mdb/<server-id>` and roll one node at a time.
+
 ## Design
 
 ### Architecture

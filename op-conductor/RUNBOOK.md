@@ -17,6 +17,8 @@ OP_NODE_CONDUCTOR_RPC=<conductor-rpc-endpoint> # for example http://conductor:85
 # prefix for the server id, used to identify the server in the raft cluster
 RAFT_SERVER_ID_PREFIX=<prefix-for-server-id> # for example, sequencer-1, sequencer-2, etc
 OP_CONDUCTOR_RAFT_STORAGE_DIR=<raft-storage-dir>
+OP_CONDUCTOR_RAFT_BACKEND=bbolt|mdb|pebble|badger|leveldb # defaults to bbolt; mdb is the fastest validated option, others are available for devnet/benchmark testing
+OP_CONDUCTOR_RAFT_MDB_MAX_SIZE=<bytes> # only used with raft backend mdb, defaults to 1 GiB
 OP_CONDUCTOR_RPC_ADDR=<rpc-address> # for example, 0.0.0.0
 OP_CONDUCTOR_RPC_PORT=<rpc-port> # for example, 8545
 OP_CONDUCTOR_METRICS_ENABLED=true/false
@@ -31,7 +33,20 @@ OP_CONDUCTOR_HEALTHCHECK_INTERVAL=<healthcheck-interval> # in seconds
 OP_CONDUCTOR_HEALTHCHECK_UNSAFE_INTERVAL=<unsafe-interval> # Interval allowed between unsafe head and now measured in seconds
 OP_CONDUCTOR_HEALTHCHECK_MIN_PEER_COUNT=<min-peer-count> # minimum number of peers required to be considered healthy
 OP_CONDUCTOR_RAFT_BOOTSTRAP=true/false # set to true if you want to bootstrap the raft cluster
+# conductor-specific raft retention defaults:
+# OP_CONDUCTOR_RAFT_SNAPSHOT_INTERVAL=1s
+# OP_CONDUCTOR_RAFT_SNAPSHOT_THRESHOLD=48
+# OP_CONDUCTOR_RAFT_TRAILING_LOGS=32
 ```
+
+When switching storage backends, do not reuse the old per-node raft directory in place. Use a fresh storage root such as `/data/raft-mdb` and roll one node at a time.
+
+Use durable backend modes only:
+
+1. `mdb` uses durable LMDB transactions
+2. `pebble` uses synchronous writes
+3. `badger` uses `SyncWrites=true`
+4. `leveldb` uses the backend's `High` durability mode
 
 ### How to bootstrap a sequencer cluster from scratch
 
@@ -65,6 +80,12 @@ For every redeploy, depending on your underlying infrastructure, you need to mak
 1. `OP_CONDUCTOR_PAUSED=true` set on op-conductor so that conductor doesn't attempt to control sequencer while it's still syncing / redeploying
 2. make sure sequencer is caught up with the rest of the nodes (this step isn't strictly necessary as conductor could handle this, but from a HA perspective, it does not make sense to have a sequencer that is lagging behind to join the cluster to potentially become the leader)
 3. resume conductor after it's caught up with the rest of the nodes so that conductor can start managing the sequencer
+
+If you are changing `OP_CONDUCTOR_RAFT_BACKEND`, treat the rollout as a node replacement:
+
+1. use a fresh local raft storage directory for the new backend
+2. roll followers first, then the leader
+3. never switch multiple nodes at once
 
 ### Disaster recovery
 

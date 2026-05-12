@@ -6,6 +6,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/ethereum-optimism/optimism/op-conductor/consensus"
 	opservice "github.com/ethereum-optimism/optimism/op-service"
 	opflags "github.com/ethereum-optimism/optimism/op-service/flags"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
@@ -51,23 +52,35 @@ var (
 		Usage:   "Directory to store raft data",
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RAFT_STORAGE_DIR"),
 	}
+	RaftBackend = &cli.StringFlag{
+		Name:    "raft.backend",
+		Usage:   "Raft storage backend to use locally. Supported values: bbolt, mdb, pebble, badger, leveldb.",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RAFT_BACKEND"),
+		Value:   consensus.DefaultRaftBackend,
+	}
+	RaftMDBMaxSize = &cli.Uint64Flag{
+		Name:    "raft.mdb.max-size",
+		Usage:   "LMDB map size in bytes when raft.backend=mdb.",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RAFT_MDB_MAX_SIZE"),
+		Value:   consensus.DefaultRaftMDBMaxSize,
+	}
 	RaftSnapshotInterval = &cli.DurationFlag{
 		Name:    "raft.snapshot-interval",
 		Usage:   "The interval to check if a snapshot should be taken.",
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RAFT_SNAPSHOT_INTERVAL"),
-		Value:   120 * time.Second,
+		Value:   1 * time.Second,
 	}
 	RaftSnapshotThreshold = &cli.Uint64Flag{
 		Name:    "raft.snapshot-threshold",
 		Usage:   "Number of logs to trigger a snapshot",
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RAFT_SNAPSHOT_THRESHOLD"),
-		Value:   8192,
+		Value:   48,
 	}
 	RaftTrailingLogs = &cli.Uint64Flag{
 		Name:    "raft.trailing-logs",
 		Usage:   "Number of logs to keep after a snapshot",
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RAFT_TRAILING_LOGS"),
-		Value:   10240,
+		Value:   32,
 	}
 	RaftHeartbeatTimeout = &cli.DurationFlag{
 		Name:    "raft.heartbeat-timeout",
@@ -220,6 +233,8 @@ var optionalFlags = []cli.Flag{
 	Paused,
 	RPCEnableProxy,
 	RaftBootstrap,
+	RaftBackend,
+	RaftMDBMaxSize,
 	HealthCheckSafeEnabled,
 	HealthCheckSafeInterval,
 	RaftSnapshotInterval,
