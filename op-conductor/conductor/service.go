@@ -296,6 +296,13 @@ func (oc *OpConductor) initRPCServer(ctx context.Context) error {
 		Service:   api,
 	})
 
+	// Binary SSZ commit endpoint. Sized to comfortably fit a 10MB SSZ block;
+	// raise alongside the JSON-RPC body limit if larger blocks are needed.
+	server.AddHandler(
+		conductorrpc.CommitUnsafePayloadPath,
+		conductorrpc.BinaryCommitHandler(oc.log, oc, 16*1024*1024),
+	)
+
 	if oc.cfg.RPCEnableProxy {
 		execClient, err := dial.DialEthClientWithTimeout(ctx, 1*time.Minute, oc.log, oc.cfg.ExecutionRPC)
 		if err != nil {
@@ -638,6 +645,12 @@ func (oc *OpConductor) TransferLeaderToServer(_ context.Context, id string, addr
 // CommitUnsafePayload commits an unsafe payload (latest head) to the cluster FSM ensuring strong consistency by leveraging Raft consensus mechanisms.
 func (oc *OpConductor) CommitUnsafePayload(_ context.Context, payload *eth.ExecutionPayloadEnvelope) error {
 	return oc.cons.CommitUnsafePayload(payload)
+}
+
+// CommitUnsafePayloadSSZ commits a pre-SSZ-encoded unsafe payload to the cluster FSM.
+// Used by the binary HTTP endpoint to avoid the JSON-decode -> SSZ-marshal round trip.
+func (oc *OpConductor) CommitUnsafePayloadSSZ(_ context.Context, ssz []byte) error {
+	return oc.cons.CommitUnsafePayloadSSZ(ssz)
 }
 
 // SequencerHealthy returns true if sequencer is healthy.
