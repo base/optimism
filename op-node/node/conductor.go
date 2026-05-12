@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync/atomic"
 	"time"
 
@@ -25,7 +26,8 @@ type ConductorClient struct {
 	metrics *metrics.Metrics
 	log     log.Logger
 
-	apiClient locks.RWValue[*conductorRpc.APIClient]
+	apiClient    locks.RWValue[*conductorRpc.APIClient]
+	binaryClient locks.RWValue[*conductorRpc.BinaryCommitClient]
 
 	// overrideLeader is used to override the leader check for disaster recovery purposes.
 	// During disaster situations where the cluster is unhealthy (no leader, only 1 or less nodes up),
@@ -63,6 +65,16 @@ func (c *ConductorClient) initialize(ctx context.Context) error {
 		return fmt.Errorf("failed to dial conductor RPC: %w", err)
 	}
 	c.apiClient.Value = conductorRpc.NewAPIClient(conductorRpcClient)
+
+	if c.cfg.ConductorBinaryCommit {
+		c.binaryClient.Lock()
+		defer c.binaryClient.Unlock()
+		// Reuse the conductor RPC endpoint URL — the binary commit handler is
+		// served on the same HTTP server at conductorRpc.CommitUnsafePayloadPath.
+		httpClient := &http.Client{Timeout: c.cfg.ConductorRpcTimeout}
+		c.binaryClient.Value = conductorRpc.NewBinaryCommitClient(endpoint, httpClient)
+		c.log.Info("Conductor binary commit endpoint enabled", "endpoint", endpoint)
+	}
 	return nil
 }
 
@@ -94,6 +106,8 @@ func (c *ConductorClient) Leader(ctx context.Context) (bool, error) {
 }
 
 // CommitUnsafePayload commits an unsafe payload to the conductor log.
+// Uses the SSZ-binary endpoint when --conductor.binary-commit is set;
+// otherwise the existing JSON-RPC method.
 func (c *ConductorClient) CommitUnsafePayload(ctx context.Context, payload *eth.ExecutionPayloadEnvelope) error {
 	if c.overrideLeader.Load() {
 		return nil
@@ -105,10 +119,13 @@ func (c *ConductorClient) CommitUnsafePayload(ctx context.Context, payload *eth.
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.ConductorRpcTimeout)
 	defer cancel()
 
-	err := retry.Do0(ctx, 2, retry.Fixed(50*time.Millisecond), func() error {
+	commit := func() error {
+		if bc := c.binaryClient.Get(); bc != nil {
+			return bc.CommitUnsafePayload(ctx, payload)
+		}
 		return c.apiClient.Get().CommitUnsafePayload(ctx, payload)
-	})
-	return err
+	}
+	return retry.Do0(ctx, 2, retry.Fixed(50*time.Millisecond), commit)
 }
 
 // OverrideLeader implements conductor.SequencerConductor.
