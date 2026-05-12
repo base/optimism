@@ -34,11 +34,31 @@ func TestConfigCheckRollupBoostAndNextMutuallyExclusive(t *testing.T) {
 
 func TestConfigCheckRejectsInvalidRaftBackend(t *testing.T) {
 	cfg := validConfig()
-	cfg.RaftBackend = "badger"
+	cfg.RaftBackend = "not-a-backend"
 
 	err := cfg.Check()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid raft backend")
+}
+
+func TestConfigCheckAcceptsSupportedRaftBackends(t *testing.T) {
+	backends := []string{
+		consensus.RaftBackendBbolt,
+		consensus.RaftBackendMDB,
+		consensus.RaftBackendPebble,
+		consensus.RaftBackendBadger,
+		consensus.RaftBackendLevelDB,
+	}
+
+	for _, backend := range backends {
+		t.Run(backend, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.RaftBackend = backend
+
+			err := cfg.Check()
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestConfigCheckRequiresMDBMaxSize(t *testing.T) {
@@ -90,5 +110,11 @@ func validConfig() *Config {
 		RaftSnapshotInterval:  time.Second,
 		RaftSnapshotThreshold: 48,
 		RaftTrailingLogs:      32,
+		HealthCheck: HealthCheckConfig{
+			Interval:       10,
+			UnsafeInterval: 12,
+			SafeInterval:   1200,
+			MinPeerCount:   1,
+		},
 	}
 }

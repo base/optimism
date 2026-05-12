@@ -54,7 +54,7 @@ var (
 	}
 	RaftBackend = &cli.StringFlag{
 		Name:    "raft.backend",
-		Usage:   "Raft storage backend to use locally. Supported values: bbolt, mdb.",
+		Usage:   "Raft storage backend to use locally. Supported values: bbolt, mdb, pebble, badger, leveldb.",
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RAFT_BACKEND"),
 		Value:   consensus.DefaultRaftBackend,
 	}

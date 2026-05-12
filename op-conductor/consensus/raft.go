@@ -9,12 +9,16 @@ import (
 	"strings"
 	"time"
 
+	raftbadger "github.com/BBVA/raft-badger"
+	"github.com/cockroachdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/raft"
 	boltdb "github.com/hashicorp/raft-boltdb/v2"
 	raftmdb "github.com/hashicorp/raft-mdb"
 	"github.com/pkg/errors"
+	raftleveldb "github.com/tidwall/raft-leveldb"
+	raftpebbledb "github.com/xkeyideal/raft-pebbledb"
 
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 )
@@ -24,6 +28,9 @@ const defaultTimeout = 5 * time.Second
 const (
 	RaftBackendBbolt      = "bbolt"
 	RaftBackendMDB        = "mdb"
+	RaftBackendPebble     = "pebble"
+	RaftBackendBadger     = "badger"
+	RaftBackendLevelDB    = "leveldb"
 	DefaultRaftBackend    = RaftBackendBbolt
 	DefaultRaftMDBMaxSize = 1 << 30
 )
@@ -235,7 +242,7 @@ func NewRaftConsensus(log log.Logger, cfg *RaftConsensusConfig) (*RaftConsensus,
 
 func ValidRaftBackend(backend string) bool {
 	switch normalizeRaftBackend(backend) {
-	case RaftBackendBbolt, RaftBackendMDB:
+	case RaftBackendBbolt, RaftBackendMDB, RaftBackendPebble, RaftBackendBadger, RaftBackendLevelDB:
 		return true
 	default:
 		return false
@@ -255,6 +262,12 @@ func newRaftStores(baseDir string, cfg *RaftConsensusConfig) (*raftStores, error
 		return newBoltRaftStores(baseDir, cfg.Metrics)
 	case RaftBackendMDB:
 		return newMDBRaftStores(baseDir, cfg.Metrics, cfg.MDBMaxSize)
+	case RaftBackendPebble:
+		return newPebbleRaftStores(baseDir, cfg.Metrics)
+	case RaftBackendBadger:
+		return newBadgerRaftStores(baseDir, cfg.Metrics)
+	case RaftBackendLevelDB:
+		return newLevelDBRaftStores(baseDir, cfg.Metrics)
 	default:
 		return nil, fmt.Errorf("unsupported raft backend %q", cfg.Backend)
 	}
@@ -295,6 +308,48 @@ func newMDBRaftStores(baseDir string, metrics ConsensusMetrics, maxSize uint64) 
 	store, err := raftmdb.NewMDBStoreWithSize(baseDir, maxSize)
 	if err != nil {
 		return nil, fmt.Errorf(`raftmdb.NewMDBStoreWithSize(%q, %d): %w`, baseDir, maxSize, err)
+	}
+
+	return &raftStores{
+		logStore:    wrapInstrumentedLogStore(store, metrics),
+		stableStore: store,
+		closeFn:     store.Close,
+	}, nil
+}
+
+func newPebbleRaftStores(baseDir string, metrics ConsensusMetrics) (*raftStores, error) {
+	storePath := filepath.Join(baseDir, "pebble")
+	store, err := raftpebbledb.NewPebbleStore(storePath, pebble.DefaultLogger, raftpebbledb.DefaultPebbleDBConfig())
+	if err != nil {
+		return nil, fmt.Errorf(`raftpebbledb.NewPebbleStore(%q): %w`, storePath, err)
+	}
+
+	return &raftStores{
+		logStore:    wrapInstrumentedLogStore(store, metrics),
+		stableStore: store,
+		closeFn:     store.Close,
+	}, nil
+}
+
+func newBadgerRaftStores(baseDir string, metrics ConsensusMetrics) (*raftStores, error) {
+	storePath := filepath.Join(baseDir, "badger")
+	store, err := raftbadger.NewBadgerStore(storePath)
+	if err != nil {
+		return nil, fmt.Errorf(`raftbadger.NewBadgerStore(%q): %w`, storePath, err)
+	}
+
+	return &raftStores{
+		logStore:    wrapInstrumentedLogStore(store, metrics),
+		stableStore: store,
+		closeFn:     store.Close,
+	}, nil
+}
+
+func newLevelDBRaftStores(baseDir string, metrics ConsensusMetrics) (*raftStores, error) {
+	storePath := filepath.Join(baseDir, "leveldb")
+	store, err := raftleveldb.NewLevelDBStore(storePath, raftleveldb.High)
+	if err != nil {
+		return nil, fmt.Errorf(`raftleveldb.NewLevelDBStore(%q): %w`, storePath, err)
 	}
 
 	return &raftStores{

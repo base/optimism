@@ -17,7 +17,7 @@ OP_NODE_CONDUCTOR_RPC=<conductor-rpc-endpoint> # for example http://conductor:85
 # prefix for the server id, used to identify the server in the raft cluster
 RAFT_SERVER_ID_PREFIX=<prefix-for-server-id> # for example, sequencer-1, sequencer-2, etc
 OP_CONDUCTOR_RAFT_STORAGE_DIR=<raft-storage-dir>
-OP_CONDUCTOR_RAFT_BACKEND=bbolt|mdb # defaults to bbolt; use mdb for the faster LMDB-backed store
+OP_CONDUCTOR_RAFT_BACKEND=bbolt|mdb|pebble|badger|leveldb # defaults to bbolt; mdb is the fastest validated option, others are available for devnet/benchmark testing
 OP_CONDUCTOR_RAFT_MDB_MAX_SIZE=<bytes> # only used with raft backend mdb, defaults to 1 GiB
 OP_CONDUCTOR_RPC_ADDR=<rpc-address> # for example, 0.0.0.0
 OP_CONDUCTOR_RPC_PORT=<rpc-port> # for example, 8545
@@ -40,6 +40,13 @@ OP_CONDUCTOR_RAFT_BOOTSTRAP=true/false # set to true if you want to bootstrap th
 ```
 
 When switching storage backends, do not reuse the old per-node raft directory in place. Use a fresh storage root such as `/data/raft-mdb` and roll one node at a time.
+
+Use durable backend modes only:
+
+1. `mdb` uses durable LMDB transactions
+2. `pebble` uses synchronous writes
+3. `badger` uses `SyncWrites=true`
+4. `leveldb` uses the backend's `High` durability mode
 
 ### How to bootstrap a sequencer cluster from scratch
 
