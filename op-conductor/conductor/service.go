@@ -300,7 +300,7 @@ func (oc *OpConductor) initRPCServer(ctx context.Context) error {
 	// raise alongside the JSON-RPC body limit if larger blocks are needed.
 	server.AddHandler(
 		conductorrpc.CommitUnsafePayloadPath,
-		conductorrpc.BinaryCommitHandler(oc.log, oc, 16*1024*1024),
+		conductorrpc.BinaryCommitHandler(oc.log, oc, 16*1024*1024, oc.metrics),
 	)
 
 	if oc.cfg.RPCEnableProxy {

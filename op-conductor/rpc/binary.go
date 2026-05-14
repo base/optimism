@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -35,11 +36,20 @@ type commitSSZBackend interface {
 	CommitUnsafePayloadSSZ(ctx context.Context, ssz []byte) error
 }
 
+// BinaryCommitRecorder records latency for the binary commit endpoint.
+// Implement this with a Prometheus histogram to get a metric comparable to
+// op_conductor_rpc_server_request_duration_seconds on the JSON-RPC path.
+type BinaryCommitRecorder interface {
+	RecordBinaryCommitDuration(seconds float64, success bool)
+}
+
 // BinaryCommitHandler returns an http.Handler that accepts SSZ-encoded payloads
 // and forwards them to the conductor's raft layer. maxBodyBytes caps the
 // request body to prevent DoS; 0 means no cap (not recommended).
-func BinaryCommitHandler(lgr log.Logger, backend commitSSZBackend, maxBodyBytes int64) http.Handler {
+// recorder may be nil (metrics disabled).
+func BinaryCommitHandler(lgr log.Logger, backend commitSSZBackend, maxBodyBytes int64, recorder BinaryCommitRecorder) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -88,8 +98,14 @@ func BinaryCommitHandler(lgr log.Logger, backend commitSSZBackend, maxBodyBytes 
 
 		if err := backend.CommitUnsafePayloadSSZ(r.Context(), ssz); err != nil {
 			lgr.Warn("failed to commit unsafe payload (binary)", "err", err, "size", len(ssz))
+			if recorder != nil {
+				recorder.RecordBinaryCommitDuration(time.Since(start).Seconds(), false)
+			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if recorder != nil {
+			recorder.RecordBinaryCommitDuration(time.Since(start).Seconds(), true)
 		}
 		w.WriteHeader(http.StatusOK)
 	})
