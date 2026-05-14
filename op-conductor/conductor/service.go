@@ -177,6 +177,8 @@ func (c *OpConductor) initConsensus(ctx context.Context) error {
 		return nil
 	}
 
+	c.log.Info("initializing raft consensus", "backend", c.cfg.RaftBackend, "storage_dir", c.cfg.RaftStorageDir, "server_id", c.cfg.RaftServerID)
+
 	raftConsensusConfig := &consensus.RaftConsensusConfig{
 		ServerID: c.cfg.RaftServerID,
 		// AdvertisedAddr may be empty: the server will then default to what it binds to.
@@ -473,7 +475,7 @@ func (oc *OpConductor) Start(ctx context.Context) error {
 	oc.wg.Add(1)
 	go oc.loop()
 
-	oc.metrics.RecordInfo(oc.version)
+	oc.metrics.RecordInfo(oc.version, oc.cfg.RaftBackend)
 	oc.metrics.RecordUp()
 
 	oc.log.Info("OpConductor started")

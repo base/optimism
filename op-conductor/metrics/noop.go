@@ -8,7 +8,7 @@ type NoopMetricsImpl struct {
 
 var NoopMetrics Metricer = new(NoopMetricsImpl)
 
-func (*NoopMetricsImpl) RecordInfo(version string)                                       {}
+func (*NoopMetricsImpl) RecordInfo(version, raftBackend string)                           {}
 func (*NoopMetricsImpl) RecordUp()                                                       {}
 func (*NoopMetricsImpl) RecordStateChange(leader bool, healthy bool, active bool)        {}
 func (*NoopMetricsImpl) RecordLeaderTransfer(success bool)                               {}

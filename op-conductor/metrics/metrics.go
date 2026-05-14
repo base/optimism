@@ -12,7 +12,7 @@ import (
 const Namespace = "op_conductor"
 
 type Metricer interface {
-	RecordInfo(version string)
+	RecordInfo(version, raftBackend string)
 	RecordUp()
 	RecordStateChange(leader bool, healthy bool, active bool)
 	RecordLeaderTransfer(success bool)
@@ -85,6 +85,7 @@ func NewMetrics() *Metrics {
 			Help:      "Pseudo-metric tracking version and config info",
 		}, []string{
 			"version",
+			"raft_backend",
 		}),
 		up: factory.NewGauge(prometheus.GaugeOpts{
 			Namespace: Namespace,
@@ -183,8 +184,8 @@ func (m *Metrics) Start(host string, port int) (*httputil.HTTPServer, error) {
 
 // RecordInfo sets a pseudo-metric that contains versioning and
 // config info for the op-proposer.
-func (m *Metrics) RecordInfo(version string) {
-	m.info.WithLabelValues(version).Set(1)
+func (m *Metrics) RecordInfo(version, raftBackend string) {
+	m.info.WithLabelValues(version, raftBackend).Set(1)
 }
 
 // RecordUp sets the up metric to 1.
