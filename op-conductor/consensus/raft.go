@@ -513,6 +513,30 @@ func (rc *RaftConsensus) CommitUnsafePayload(payload *eth.ExecutionPayloadEnvelo
 	return nil
 }
 
+// CommitUnsafePayloadSSZ implements Consensus. The bytes are passed directly to
+// raft.Apply; the FSM validates by attempting UnmarshalSSZ on receive. This
+// avoids the SSZ marshal step (and, when callers send SSZ over the wire, the
+// JSON-decode-then-SSZ-marshal round trip the typed entrypoint requires).
+func (rc *RaftConsensus) CommitUnsafePayloadSSZ(ssz []byte) error {
+	if len(ssz) == 0 {
+		return errors.New("empty payload")
+	}
+
+	applyStart := time.Now()
+	f := rc.r.Apply(ssz, defaultTimeout)
+	if err := f.Error(); err != nil {
+		return errors.Wrap(err, "failed to apply payload envelope")
+	}
+	applyDur := time.Since(applyStart)
+
+	if rc.metrics != nil {
+		// No marshal step on this path.
+		rc.metrics.RecordCommitDuration(0, applyDur.Seconds())
+		rc.metrics.RecordCommitPayloadSize(float64(len(ssz)))
+	}
+	return nil
+}
+
 type instrumentedLogStore struct {
 	raft.LogStore
 	metrics ConsensusMetrics

@@ -82,6 +82,10 @@ type Consensus interface {
 
 	// CommitUnsafePayload commits latest unsafe payload to the FSM in a strongly consistent fashion.
 	CommitUnsafePayload(payload *eth.ExecutionPayloadEnvelope) error
+	// CommitUnsafePayloadSSZ commits a pre-SSZ-encoded unsafe payload to the FSM,
+	// skipping the marshal step. The bytes are handed directly to raft.Apply and
+	// validated by the FSM on receive. Used by the binary HTTP endpoint.
+	CommitUnsafePayloadSSZ(ssz []byte) error
 	// LatestUnsafePayload returns the latest unsafe payload from FSM in a strongly consistent fashion.
 	LatestUnsafePayload() (*eth.ExecutionPayloadEnvelope, error)
 

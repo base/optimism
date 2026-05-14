@@ -81,9 +81,10 @@ type Config struct {
 	Cancel context.CancelCauseFunc
 
 	// Conductor is used to determine this node is the leader sequencer.
-	ConductorEnabled    bool
-	ConductorRpc        ConductorRPCFunc
-	ConductorRpcTimeout time.Duration
+	ConductorEnabled      bool
+	ConductorRpc          ConductorRPCFunc
+	ConductorRpcTimeout   time.Duration
+	ConductorBinaryCommit bool
 
 	// AltDA config
 	AltDA altda.CLIConfig

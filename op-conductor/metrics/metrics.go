@@ -12,7 +12,7 @@ import (
 const Namespace = "op_conductor"
 
 type Metricer interface {
-	RecordInfo(version string)
+	RecordInfo(version, raftBackend string)
 	RecordUp()
 	RecordStateChange(leader bool, healthy bool, active bool)
 	RecordLeaderTransfer(success bool)
@@ -22,6 +22,10 @@ type Metricer interface {
 	RecordLoopExecutionTime(duration float64)
 	RecordRollupBoostConnectionAttempts(success bool, source string)
 	RecordWebSocketClientCount(count int)
+	// RecordBinaryCommitDuration records end-to-end handler duration for
+	// POST /commit-unsafe-payload requests. The equivalent metric for the
+	// JSON-RPC path is rpc_server_request_duration_seconds{method=conductor_commitUnsafePayload}.
+	RecordBinaryCommitDuration(seconds float64, success bool)
 	opmetrics.RPCMetricer
 	consensus.ConsensusMetrics
 }
@@ -50,11 +54,12 @@ type Metrics struct {
 	loopExecutionTime prometheus.Histogram
 	webSocketClients  prometheus.Gauge
 
-	commitMarshalDuration   prometheus.Histogram
-	commitRaftApplyDuration prometheus.Histogram
-	commitPayloadSize       prometheus.Histogram
-	fsmApplyDuration        prometheus.Histogram
-	logStoreDuration        prometheus.Histogram
+	commitMarshalDuration      prometheus.Histogram
+	commitRaftApplyDuration    prometheus.Histogram
+	commitPayloadSize          prometheus.Histogram
+	fsmApplyDuration           prometheus.Histogram
+	logStoreDuration           prometheus.Histogram
+	binaryCommitRequestDuration *prometheus.HistogramVec
 }
 
 func (m *Metrics) Registry() *prometheus.Registry {
@@ -80,6 +85,7 @@ func NewMetrics() *Metrics {
 			Help:      "Pseudo-metric tracking version and config info",
 		}, []string{
 			"version",
+			"raft_backend",
 		}),
 		up: factory.NewGauge(prometheus.GaugeOpts{
 			Namespace: Namespace,
@@ -161,6 +167,14 @@ func NewMetrics() *Metrics {
 			Help:      "Time (in seconds) spent writing raft log entries to the underlying log store",
 			Buckets:   []float64{.0001, .00025, .0005, .001, .0025, .005, .01, .025, .05},
 		}),
+		binaryCommitRequestDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Name:      "binary_commit_request_duration_seconds",
+			Help:      "End-to-end handler duration for POST /commit-unsafe-payload requests. " +
+				"Directly comparable to rpc_server_request_duration_seconds{method=conductor_commitunsafepayload} " +
+				"on the JSON-RPC path.",
+			Buckets: []float64{.001, .0025, .005, .01, .025, .05, .1, .25, .5},
+		}, []string{"success"}),
 	}
 }
 
@@ -170,8 +184,8 @@ func (m *Metrics) Start(host string, port int) (*httputil.HTTPServer, error) {
 
 // RecordInfo sets a pseudo-metric that contains versioning and
 // config info for the op-proposer.
-func (m *Metrics) RecordInfo(version string) {
-	m.info.WithLabelValues(version).Set(1)
+func (m *Metrics) RecordInfo(version, raftBackend string) {
+	m.info.WithLabelValues(version, raftBackend).Set(1)
 }
 
 // RecordUp sets the up metric to 1.
@@ -238,4 +252,8 @@ func (m *Metrics) RecordFSMApplyDuration(seconds float64) {
 
 func (m *Metrics) RecordLogStoreDuration(seconds float64) {
 	m.logStoreDuration.Observe(seconds)
+}
+
+func (m *Metrics) RecordBinaryCommitDuration(seconds float64, success bool) {
+	m.binaryCommitRequestDuration.WithLabelValues(strconv.FormatBool(success)).Observe(seconds)
 }

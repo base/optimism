@@ -8,7 +8,7 @@ type NoopMetricsImpl struct {
 
 var NoopMetrics Metricer = new(NoopMetricsImpl)
 
-func (*NoopMetricsImpl) RecordInfo(version string)                                       {}
+func (*NoopMetricsImpl) RecordInfo(version, raftBackend string)                           {}
 func (*NoopMetricsImpl) RecordUp()                                                       {}
 func (*NoopMetricsImpl) RecordStateChange(leader bool, healthy bool, active bool)        {}
 func (*NoopMetricsImpl) RecordLeaderTransfer(success bool)                               {}
@@ -20,5 +20,6 @@ func (*NoopMetricsImpl) RecordRollupBoostConnectionAttempts(success bool, source
 func (*NoopMetricsImpl) RecordWebSocketClientCount(count int)                            {}
 func (*NoopMetricsImpl) RecordCommitDuration(marshalSec, raftApplySec float64)           {}
 func (*NoopMetricsImpl) RecordCommitPayloadSize(payloadBytes float64)                    {}
-func (*NoopMetricsImpl) RecordFSMApplyDuration(seconds float64)                          {}
-func (*NoopMetricsImpl) RecordLogStoreDuration(seconds float64)                          {}
+func (*NoopMetricsImpl) RecordFSMApplyDuration(seconds float64)                             {}
+func (*NoopMetricsImpl) RecordLogStoreDuration(seconds float64)                             {}
+func (*NoopMetricsImpl) RecordBinaryCommitDuration(seconds float64, success bool)           {}

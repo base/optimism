@@ -177,6 +177,8 @@ func (c *OpConductor) initConsensus(ctx context.Context) error {
 		return nil
 	}
 
+	c.log.Info("initializing raft consensus", "backend", c.cfg.RaftBackend, "storage_dir", c.cfg.RaftStorageDir, "server_id", c.cfg.RaftServerID)
+
 	raftConsensusConfig := &consensus.RaftConsensusConfig{
 		ServerID: c.cfg.RaftServerID,
 		// AdvertisedAddr may be empty: the server will then default to what it binds to.
@@ -295,6 +297,13 @@ func (oc *OpConductor) initRPCServer(ctx context.Context) error {
 		Version:   oc.version,
 		Service:   api,
 	})
+
+	// Binary SSZ commit endpoint. Sized to comfortably fit a 10MB SSZ block;
+	// raise alongside the JSON-RPC body limit if larger blocks are needed.
+	server.AddHandler(
+		conductorrpc.CommitUnsafePayloadPath,
+		conductorrpc.BinaryCommitHandler(oc.log, oc, 16*1024*1024, oc.metrics),
+	)
 
 	if oc.cfg.RPCEnableProxy {
 		execClient, err := dial.DialEthClientWithTimeout(ctx, 1*time.Minute, oc.log, oc.cfg.ExecutionRPC)
@@ -466,7 +475,7 @@ func (oc *OpConductor) Start(ctx context.Context) error {
 	oc.wg.Add(1)
 	go oc.loop()
 
-	oc.metrics.RecordInfo(oc.version)
+	oc.metrics.RecordInfo(oc.version, oc.cfg.RaftBackend)
 	oc.metrics.RecordUp()
 
 	oc.log.Info("OpConductor started")
@@ -638,6 +647,12 @@ func (oc *OpConductor) TransferLeaderToServer(_ context.Context, id string, addr
 // CommitUnsafePayload commits an unsafe payload (latest head) to the cluster FSM ensuring strong consistency by leveraging Raft consensus mechanisms.
 func (oc *OpConductor) CommitUnsafePayload(_ context.Context, payload *eth.ExecutionPayloadEnvelope) error {
 	return oc.cons.CommitUnsafePayload(payload)
+}
+
+// CommitUnsafePayloadSSZ commits a pre-SSZ-encoded unsafe payload to the cluster FSM.
+// Used by the binary HTTP endpoint to avoid the JSON-decode -> SSZ-marshal round trip.
+func (oc *OpConductor) CommitUnsafePayloadSSZ(_ context.Context, ssz []byte) error {
+	return oc.cons.CommitUnsafePayloadSSZ(ssz)
 }
 
 // SequencerHealthy returns true if sequencer is healthy.
