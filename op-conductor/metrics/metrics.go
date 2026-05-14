@@ -21,6 +21,10 @@ type Metricer interface {
 	RecordLoopExecutionTime(duration float64)
 	RecordRollupBoostConnectionAttempts(success bool, source string)
 	RecordWebSocketClientCount(count int)
+	// RecordBinaryCommitDuration records end-to-end handler duration for
+	// POST /commit-unsafe-payload requests. The equivalent metric for the
+	// JSON-RPC path is rpc_server_request_duration_seconds{method=conductor_commitUnsafePayload}.
+	RecordBinaryCommitDuration(seconds float64, success bool)
 	opmetrics.RPCMetricer
 }
 
@@ -46,6 +50,8 @@ type Metrics struct {
 
 	loopExecutionTime prometheus.Histogram
 	webSocketClients  prometheus.Gauge
+
+	binaryCommitRequestDuration *prometheus.HistogramVec
 }
 
 func (m *Metrics) Registry() *prometheus.Registry {
@@ -122,6 +128,14 @@ func NewMetrics() *Metrics {
 			Name:      "websocket_clients_connected",
 			Help:      "Number of WebSocket clients currently connected to the hub",
 		}),
+		binaryCommitRequestDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Name:      "binary_commit_request_duration_seconds",
+			Help: "End-to-end handler duration for POST /commit-unsafe-payload requests. " +
+				"Directly comparable to rpc_server_request_duration_seconds{method=conductor_commitunsafepayload} " +
+				"on the JSON-RPC path.",
+			Buckets: []float64{.001, .0025, .005, .01, .025, .05, .1, .25, .5},
+		}, []string{"success"}),
 	}
 }
 
@@ -182,4 +196,8 @@ func (m *Metrics) RecordRollupBoostConnectionAttempts(success bool, source strin
 // RecordWebSocketClientCount sets the current number of WebSocket clients connected.
 func (m *Metrics) RecordWebSocketClientCount(count int) {
 	m.webSocketClients.Set(float64(count))
+}
+
+func (m *Metrics) RecordBinaryCommitDuration(seconds float64, success bool) {
+	m.binaryCommitRequestDuration.WithLabelValues(strconv.FormatBool(success)).Observe(seconds)
 }
