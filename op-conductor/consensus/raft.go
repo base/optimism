@@ -386,6 +386,7 @@ func (rc *RaftConsensus) CommitUnsafePayloadSSZ(ssz []byte) error {
 		}
 	}
 
+	applyStart := time.Now()
 	f := rc.r.Apply(ssz, defaultTimeout)
 	if err := f.Error(); err != nil {
 		return errors.Wrap(err, "failed to apply payload envelope")
@@ -395,6 +396,14 @@ func (rc *RaftConsensus) CommitUnsafePayloadSSZ(ssz []byte) error {
 			return errors.Wrap(err, "failed to apply payload envelope to FSM")
 		}
 		return fmt.Errorf("unexpected raft apply response: %T: %v", resp, resp)
+	}
+	applyDur := time.Since(applyStart)
+
+	if rc.metrics != nil {
+		// Mirror the metrics emitted by the JSON-RPC CommitUnsafePayload path.
+		// Marshal duration is zero because the SSZ bytes arrive pre-encoded.
+		rc.metrics.RecordCommitDuration(0, applyDur.Seconds())
+		rc.metrics.RecordCommitPayloadSize(float64(len(ssz)))
 	}
 	return nil
 }
