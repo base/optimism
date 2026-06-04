@@ -408,6 +408,15 @@ var (
 		Value:    time.Second * 1,
 		Category: SequencerCategory,
 	}
+	ConductorBinaryCommitFlag = &cli.BoolFlag{
+		Name: "conductor.binary-commit",
+		Usage: "Use the conductor's SSZ-binary commit-unsafe-payload endpoint instead of " +
+			"JSON-RPC. Avoids JSON-encoding the payload (~10x faster on the leader RPC " +
+			"handler). Requires conductor with binary endpoint support.",
+		EnvVars:  prefixEnvVars("CONDUCTOR_BINARY_COMMIT"),
+		Value:    false,
+		Category: SequencerCategory,
+	}
 	/* Interop flags, experimental. */
 	InteropRPCAddr = &cli.StringFlag{
 		Name: "interop.rpc.addr",
@@ -506,6 +515,7 @@ var optionalFlags = []cli.Flag{
 	ConductorEnabledFlag,
 	ConductorRpcFlag,
 	ConductorRpcTimeoutFlag,
+	ConductorBinaryCommitFlag,
 	SafeDBPath,
 	L1ChainConfig,
 	L2EngineKind,

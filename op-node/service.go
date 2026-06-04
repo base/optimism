@@ -124,7 +124,8 @@ func NewConfig(ctx cliiface.Context, log log.Logger) (*config.Config, error) {
 		ConductorRpc: func(context.Context) (string, error) {
 			return conductorRPCEndpoint, nil
 		},
-		ConductorRpcTimeout: ctx.Duration(flags.ConductorRpcTimeoutFlag.Name),
+		ConductorRpcTimeout:   ctx.Duration(flags.ConductorRpcTimeoutFlag.Name),
+		ConductorBinaryCommit: ctx.Bool(flags.ConductorBinaryCommitFlag.Name),
 
 		AltDA: altda.ReadCLIConfig(ctx),
 

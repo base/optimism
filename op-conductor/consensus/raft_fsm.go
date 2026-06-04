@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/hashicorp/raft"
@@ -17,18 +18,27 @@ var _ raft.FSM = (*unsafeHeadTracker)(nil)
 // unsafeHeadTracker implements raft.FSM for storing unsafe head payload into raft consensus layer.
 type unsafeHeadTracker struct {
 	log        log.Logger
+	metrics    ConsensusMetrics
 	mtx        sync.RWMutex
 	unsafeHead *eth.ExecutionPayloadEnvelope
 }
 
-func NewUnsafeHeadTracker(log log.Logger) *unsafeHeadTracker {
+func NewUnsafeHeadTracker(log log.Logger, metrics ConsensusMetrics) *unsafeHeadTracker {
 	return &unsafeHeadTracker{
-		log: log,
+		log:     log,
+		metrics: metrics,
 	}
 }
 
 // Apply implements raft.FSM, it applies the latest change (latest unsafe head payload) to FSM.
 func (t *unsafeHeadTracker) Apply(l *raft.Log) interface{} {
+	start := time.Now()
+	defer func() {
+		if t.metrics != nil {
+			t.metrics.RecordFSMApplyDuration(time.Since(start).Seconds())
+		}
+	}()
+
 	if len(l.Data) == 0 {
 		return fmt.Errorf("log data is nil or empty")
 	}

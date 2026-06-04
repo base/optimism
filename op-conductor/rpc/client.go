@@ -1,7 +1,12 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/rpc"
 
@@ -136,4 +141,59 @@ func (c *APIClient) ClusterMembership(ctx context.Context) (*consensus.ClusterMe
 	var clusterMembership consensus.ClusterMembership
 	err := c.c.CallContext(ctx, &clusterMembership, prefixRPC("clusterMembership"))
 	return &clusterMembership, err
+}
+
+// BinaryCommitClient is a thin HTTP client for the SSZ binary commit endpoint.
+// It is intentionally separate from APIClient (which speaks JSON-RPC) so that
+// callers can choose the binary path without sharing transport or codec.
+type BinaryCommitClient struct {
+	httpClient *http.Client
+	endpoint   string
+}
+
+// NewBinaryCommitClient constructs a client targeting baseURL (e.g.
+// "http://conductor:8547"). httpClient may be nil; the default is used.
+func NewBinaryCommitClient(baseURL string, httpClient *http.Client) *BinaryCommitClient {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	return &BinaryCommitClient{
+		httpClient: httpClient,
+		endpoint:   strings.TrimRight(baseURL, "/") + CommitUnsafePayloadPath,
+	}
+}
+
+// CommitUnsafePayload SSZ-encodes payload and POSTs it to the conductor's
+// binary endpoint. Returns nil on 200, otherwise an error including the
+// server's response body.
+func (c *BinaryCommitClient) CommitUnsafePayload(ctx context.Context, payload *eth.ExecutionPayloadEnvelope) error {
+	var buf bytes.Buffer
+	if _, err := payload.MarshalSSZ(&buf); err != nil {
+		return fmt.Errorf("marshal ssz: %w", err)
+	}
+	return c.CommitUnsafePayloadSSZ(ctx, buf.Bytes())
+}
+
+// CommitUnsafePayloadSSZ sends already-SSZ-encoded bytes. Useful when the
+// caller already has the SSZ form (e.g. constructed directly by the EL client).
+func (c *BinaryCommitClient) CommitUnsafePayloadSSZ(ctx context.Context, ssz []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(ssz))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", SSZContentType)
+	req.ContentLength = int64(len(ssz))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	body, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("commit failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 }

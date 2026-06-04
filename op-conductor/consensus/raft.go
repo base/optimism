@@ -24,6 +24,8 @@ var _ Consensus = (*RaftConsensus)(nil)
 type RaftConsensus struct {
 	log log.Logger
 
+	metrics ConsensusMetrics
+
 	serverID raft.ServerID
 	r        *raft.Raft
 
@@ -58,6 +60,10 @@ type RaftConsensusConfig struct {
 	TrailingLogs       uint64
 	HeartbeatTimeout   time.Duration
 	LeaderLeaseTimeout time.Duration
+
+	// Metrics collects sub-operation timing data for the commit path.
+	// If nil, no metrics are recorded.
+	Metrics ConsensusMetrics
 }
 
 // checkTCPPortOpen attempts to connect to the specified address and returns an error if the connection fails.
@@ -89,10 +95,11 @@ func NewRaftConsensus(log log.Logger, cfg *RaftConsensusConfig) (*RaftConsensus,
 
 	var err error
 	logStorePath := filepath.Join(baseDir, "raft-log.db")
-	logStore, err := boltdb.NewBoltStore(logStorePath)
+	boltLogStore, err := boltdb.NewBoltStore(logStorePath)
 	if err != nil {
 		return nil, fmt.Errorf(`boltdb.NewBoltStore(%q): %w`, logStorePath, err)
 	}
+	logStore := wrapInstrumentedLogStore(boltLogStore, cfg.Metrics)
 
 	stableStorePath := filepath.Join(baseDir, "raft-stable.db")
 	stableStore, err := boltdb.NewBoltStore(stableStorePath)
@@ -131,7 +138,7 @@ func NewRaftConsensus(log log.Logger, cfg *RaftConsensusConfig) (*RaftConsensus,
 	}
 	log.Info("Raft server network transport is up", "addr", transport.LocalAddr())
 
-	fsm := NewUnsafeHeadTracker(log)
+	fsm := NewUnsafeHeadTracker(log, cfg.Metrics)
 
 	r, err := raft.NewRaft(rc, fsm, logStore, stableStore, snapshotStore, transport)
 	if err != nil {
@@ -173,11 +180,45 @@ func NewRaftConsensus(log log.Logger, cfg *RaftConsensusConfig) (*RaftConsensus,
 
 	return &RaftConsensus{
 		log:           log,
+		metrics:       cfg.Metrics,
 		r:             r,
 		serverID:      raft.ServerID(cfg.ServerID),
 		unsafeTracker: fsm,
 		transport:     transport,
 	}, err
+}
+
+func wrapInstrumentedLogStore(store raft.LogStore, metrics ConsensusMetrics) raft.LogStore {
+	if metrics == nil {
+		return store
+	}
+	return &instrumentedLogStore{
+		LogStore: store,
+		metrics:  metrics,
+	}
+}
+
+type instrumentedLogStore struct {
+	raft.LogStore
+	metrics ConsensusMetrics
+}
+
+func (s *instrumentedLogStore) StoreLog(logEntry *raft.Log) error {
+	start := time.Now()
+	err := s.LogStore.StoreLog(logEntry)
+	if s.metrics != nil {
+		s.metrics.RecordLogStoreDuration(time.Since(start).Seconds())
+	}
+	return err
+}
+
+func (s *instrumentedLogStore) StoreLogs(logEntries []*raft.Log) error {
+	start := time.Now()
+	err := s.LogStore.StoreLogs(logEntries)
+	if s.metrics != nil {
+		s.metrics.RecordLogStoreDuration(time.Since(start).Seconds())
+	}
+	return err
 }
 
 // Addr returns the address to contact this raft consensus server.
@@ -296,16 +337,74 @@ func (rc *RaftConsensus) CommitUnsafePayload(payload *eth.ExecutionPayloadEnvelo
 	rc.log.Debug("committing unsafe payload", "number", uint64(payload.ExecutionPayload.BlockNumber), "hash", payload.ExecutionPayload.BlockHash.Hex())
 
 	var buf bytes.Buffer
+	marshalStart := time.Now()
 	if _, err := payload.MarshalSSZ(&buf); err != nil {
 		return errors.Wrap(err, "failed to marshal payload envelope")
 	}
+	marshalDur := time.Since(marshalStart)
 
+	applyStart := time.Now()
 	f := rc.r.Apply(buf.Bytes(), defaultTimeout)
 	if err := f.Error(); err != nil {
 		return errors.Wrap(err, "failed to apply payload envelope")
 	}
+	if resp := f.Response(); resp != nil {
+		if err, ok := resp.(error); ok {
+			return errors.Wrap(err, "failed to apply payload envelope to FSM")
+		}
+		return fmt.Errorf("unexpected raft apply response: %T: %v", resp, resp)
+	}
+	applyDur := time.Since(applyStart)
+
+	if rc.metrics != nil {
+		rc.metrics.RecordCommitDuration(marshalDur.Seconds(), applyDur.Seconds())
+		rc.metrics.RecordCommitPayloadSize(float64(buf.Len()))
+	}
 	rc.log.Debug("unsafe payload committed", "number", uint64(payload.ExecutionPayload.BlockNumber), "hash", payload.ExecutionPayload.BlockHash.Hex())
 
+	return nil
+}
+
+// CommitUnsafePayloadSSZ implements Consensus. The raw SSZ bytes are validated
+// before being passed to raft.Apply so that malformed payloads are rejected
+// before they are replicated to the raft log on every peer. After raft.Apply
+// returns, the FSM response is also checked because the FSM may reject payloads
+// for reasons beyond SSZ validity (e.g. version mismatches).
+func (rc *RaftConsensus) CommitUnsafePayloadSSZ(ssz []byte) error {
+	if len(ssz) == 0 {
+		return errors.New("empty payload")
+	}
+
+	// Pre-validate: attempt to decode the SSZ before writing to the raft log.
+	// This mirrors the implicit validation the JSON-RPC path gets from its
+	// json.Unmarshal → MarshalSSZ round-trip and prevents corrupt data from
+	// being replicated to every peer's log store.
+	env := new(eth.ExecutionPayloadEnvelope)
+	if err := env.UnmarshalSSZ(eth.BlockV4, uint32(len(ssz)), bytes.NewReader(ssz)); err != nil {
+		if err := env.UnmarshalSSZ(eth.BlockV3, uint32(len(ssz)), bytes.NewReader(ssz)); err != nil {
+			return fmt.Errorf("invalid ssz payload: %w", err)
+		}
+	}
+
+	applyStart := time.Now()
+	f := rc.r.Apply(ssz, defaultTimeout)
+	if err := f.Error(); err != nil {
+		return errors.Wrap(err, "failed to apply payload envelope")
+	}
+	if resp := f.Response(); resp != nil {
+		if err, ok := resp.(error); ok {
+			return errors.Wrap(err, "failed to apply payload envelope to FSM")
+		}
+		return fmt.Errorf("unexpected raft apply response: %T: %v", resp, resp)
+	}
+	applyDur := time.Since(applyStart)
+
+	if rc.metrics != nil {
+		// Mirror the metrics emitted by the JSON-RPC CommitUnsafePayload path.
+		// Marshal duration is zero because the SSZ bytes arrive pre-encoded.
+		rc.metrics.RecordCommitDuration(0, applyDur.Seconds())
+		rc.metrics.RecordCommitPayloadSize(float64(len(ssz)))
+	}
 	return nil
 }
 

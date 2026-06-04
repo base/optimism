@@ -275,6 +275,51 @@ func (_c *Consensus_CommitUnsafePayload_Call) RunAndReturn(run func(payload *eth
 	return _c
 }
 
+// CommitUnsafePayloadSSZ provides a mock function for the type Consensus
+func (_mock *Consensus) CommitUnsafePayloadSSZ(ssz []byte) error {
+	ret := _mock.Called(ssz)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CommitUnsafePayloadSSZ")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func([]byte) error); ok {
+		r0 = returnFunc(ssz)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// Consensus_CommitUnsafePayloadSSZ_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CommitUnsafePayloadSSZ'
+type Consensus_CommitUnsafePayloadSSZ_Call struct {
+	*mock.Call
+}
+
+// CommitUnsafePayloadSSZ is a helper method to define mock.On call
+//   - ssz
+func (_e *Consensus_Expecter) CommitUnsafePayloadSSZ(ssz interface{}) *Consensus_CommitUnsafePayloadSSZ_Call {
+	return &Consensus_CommitUnsafePayloadSSZ_Call{Call: _e.mock.On("CommitUnsafePayloadSSZ", ssz)}
+}
+
+func (_c *Consensus_CommitUnsafePayloadSSZ_Call) Run(run func(ssz []byte)) *Consensus_CommitUnsafePayloadSSZ_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]byte))
+	})
+	return _c
+}
+
+func (_c *Consensus_CommitUnsafePayloadSSZ_Call) Return(err error) *Consensus_CommitUnsafePayloadSSZ_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *Consensus_CommitUnsafePayloadSSZ_Call) RunAndReturn(run func(ssz []byte) error) *Consensus_CommitUnsafePayloadSSZ_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DemoteVoter provides a mock function for the type Consensus
 func (_mock *Consensus) DemoteVoter(id string, version uint64) error {
 	ret := _mock.Called(id, version)
