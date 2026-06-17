@@ -9,6 +9,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 
+	"github.com/ethereum-optimism/optimism/op-conductor/consensus"
 	"github.com/ethereum-optimism/optimism/op-conductor/flags"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
@@ -35,6 +36,9 @@ type Config struct {
 
 	// RaftStorageDir is the directory to store raft data.
 	RaftStorageDir string
+
+	// RaftStorageBackend is the backend used for raft log and stable stores.
+	RaftStorageBackend string
 
 	// RaftBootstrap is true if this node should bootstrap a new raft cluster.
 	RaftBootstrap bool
@@ -117,6 +121,9 @@ func (c *Config) Check() error {
 	if c.RaftStorageDir == "" {
 		return fmt.Errorf("missing raft storage directory")
 	}
+	if !consensus.IsValidRaftStorageBackend(c.RaftStorageBackend) {
+		return fmt.Errorf("invalid raft storage backend %q", c.RaftStorageBackend)
+	}
 	if c.NodeRPC == "" {
 		return fmt.Errorf("missing node RPC")
 	}
@@ -167,6 +174,7 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*Config, error) {
 		RaftBootstrap:                 ctx.Bool(flags.RaftBootstrap.Name),
 		RaftServerID:                  ctx.String(flags.RaftServerID.Name),
 		RaftStorageDir:                ctx.String(flags.RaftStorageDir.Name),
+		RaftStorageBackend:            ctx.String(flags.RaftStorageBackend.Name),
 		RaftSnapshotInterval:          ctx.Duration(flags.RaftSnapshotInterval.Name),
 		RaftSnapshotThreshold:         ctx.Uint64(flags.RaftSnapshotThreshold.Name),
 		RaftTrailingLogs:              ctx.Uint64(flags.RaftTrailingLogs.Name),

@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	clientmocks "github.com/ethereum-optimism/optimism/op-conductor/client/mocks"
+	"github.com/ethereum-optimism/optimism/op-conductor/consensus"
 	consensusmocks "github.com/ethereum-optimism/optimism/op-conductor/consensus/mocks"
 	"github.com/ethereum-optimism/optimism/op-conductor/health"
 	healthmocks "github.com/ethereum-optimism/optimism/op-conductor/health/mocks"
@@ -31,14 +32,15 @@ import (
 
 func mockConfig(t *testing.T) Config {
 	return Config{
-		ConsensusAddr:  "127.0.0.1",
-		ConsensusPort:  0,
-		RaftServerID:   "SequencerA",
-		RaftStorageDir: "/tmp/raft",
-		RaftBootstrap:  false,
-		NodeRPC:        "http://node:8545",
-		ExecutionRPC:   "http://geth:8545",
-		Paused:         false,
+		ConsensusAddr:      "127.0.0.1",
+		ConsensusPort:      0,
+		RaftServerID:       "SequencerA",
+		RaftStorageDir:     "/tmp/raft",
+		RaftStorageBackend: consensus.RaftStorageBackendBoltDB,
+		RaftBootstrap:      false,
+		NodeRPC:            "http://node:8545",
+		ExecutionRPC:       "http://geth:8545",
+		Paused:             false,
 		HealthCheck: HealthCheckConfig{
 			Interval:       1,
 			UnsafeInterval: 3,
