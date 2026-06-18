@@ -2,10 +2,13 @@ package metrics
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/ethereum-optimism/optimism/op-conductor/consensus"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
+	hashicorpmetrics "github.com/hashicorp/go-metrics/compat"
+	hashicorpprom "github.com/hashicorp/go-metrics/compat/prometheus"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -71,6 +74,7 @@ var _ Metricer = (*Metrics)(nil)
 
 func NewMetrics() *Metrics {
 	registry := opmetrics.NewRegistry()
+	registerHashicorpRaftMetrics(registry)
 	factory := opmetrics.With(registry)
 
 	return &Metrics{
@@ -175,6 +179,28 @@ func NewMetrics() *Metrics {
 			Help:      "Time (in seconds) spent writing raft log entries to the underlying log store",
 			Buckets:   []float64{.0001, .00025, .0005, .001, .0025, .005, .01, .025, .05},
 		}),
+	}
+}
+
+func registerHashicorpRaftMetrics(registry *prometheus.Registry) {
+	sink, err := hashicorpprom.NewPrometheusSinkFrom(hashicorpprom.PrometheusOpts{
+		Expiration: 0,
+		Registerer: registry,
+		Name:       Namespace + "_hashicorp_raft",
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	cfg := hashicorpmetrics.DefaultConfig(Namespace)
+	cfg.EnableHostname = false
+	cfg.EnableHostnameLabel = false
+	cfg.EnableRuntimeMetrics = false
+	cfg.TimerGranularity = time.Second
+	cfg.FilterDefault = false
+	cfg.AllowedPrefixes = []string{Namespace + ".raft"}
+	if _, err := hashicorpmetrics.NewGlobal(cfg, sink); err != nil {
+		panic(err)
 	}
 }
 
