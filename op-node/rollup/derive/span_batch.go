@@ -25,7 +25,9 @@ import (
 // spanBatch := SpanBatchType ++ prefix ++ payload
 // prefix := rel_timestamp ++ l1_origin_num ++ parent_check ++ l1_origin_check
 // payload := block_count ++ origin_bits ++ block_tx_counts ++ txs
-// txs := contract_creation_bits ++ y_parity_bits ++ tx_sigs ++ tx_tos ++ tx_datas ++ tx_nonces ++ tx_gases ++ protected_bits
+// txs := contract_creation_bits ++ y_parity_bits ++ tx_sigs ++ tx_tos ++ tx_datas ++ tx_nonces ++ tx_gases ++ protected_bits ++ eip8130_auth_data
+//
+// eip8130_auth_data carries one sender/payer auth-proof pair per 0x7B tx in tx order, and is empty when the batch has no 0x7B txs.
 
 var ErrTooBigSpanBatchSize = errors.New("span batch size limit reached")
 

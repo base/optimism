@@ -19,7 +19,7 @@ type spanBatchTxs struct {
 	// this field must be manually set
 	totalBlockTxCount uint64
 
-	// 8 fields
+	// 9 fields
 	contractCreationBits *big.Int // standard span-batch bitlist
 	yParityBits          *big.Int // standard span-batch bitlist
 	txSigs               []spanBatchSignature
@@ -27,7 +27,8 @@ type spanBatchTxs struct {
 	txGases              []uint64
 	txTos                []common.Address
 	txDatas              []hexutil.Bytes
-	protectedBits        *big.Int // standard span-batch bitlist
+	protectedBits        *big.Int                   // standard span-batch bitlist
+	eip8130AuthData      []spanBatchEip8130AuthData // trailing column: one auth-proof bundle per 0x7B tx, in tx order
 
 	// intermediate variables which can be recovered
 	txTypes            []int
@@ -38,6 +39,12 @@ type spanBatchSignature struct {
 	v *big.Int
 	r *uint256.Int
 	s *uint256.Int
+}
+
+// spanBatchEip8130AuthData holds the high-entropy EIP-8130 auth proofs for one 0x7B tx.
+type spanBatchEip8130AuthData struct {
+	senderProof []byte
+	payerProof  []byte
 }
 
 func (btx *spanBatchTxs) encodeContractCreationBits(w io.Writer) error {
@@ -76,6 +83,66 @@ func (btx *spanBatchTxs) decodeProtectedBits(r *bytes.Reader) error {
 	}
 	btx.protectedBits = bits
 	return nil
+}
+
+func (btx *spanBatchTxs) encodeEip8130AuthData(w io.Writer) error {
+	var buf [binary.MaxVarintLen64]byte
+	for _, ad := range btx.eip8130AuthData {
+		for _, proof := range [][]byte{ad.senderProof, ad.payerProof} {
+			n := binary.PutUvarint(buf[:], uint64(len(proof)))
+			if _, err := w.Write(buf[:n]); err != nil {
+				return fmt.Errorf("cannot write eip8130 auth data length: %w", err)
+			}
+			if _, err := w.Write(proof); err != nil {
+				return fmt.Errorf("cannot write eip8130 auth data: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func (btx *spanBatchTxs) decodeEip8130AuthData(r *bytes.Reader) error {
+	var authData []spanBatchEip8130AuthData
+	for _, txType := range btx.txTypes {
+		if txType != types.Eip8130TxType {
+			continue
+		}
+		senderProof, err := decodeEip8130Proof(r)
+		if err != nil {
+			return err
+		}
+		payerProof, err := decodeEip8130Proof(r)
+		if err != nil {
+			return err
+		}
+		authData = append(authData, spanBatchEip8130AuthData{senderProof: senderProof, payerProof: payerProof})
+	}
+	btx.eip8130AuthData = authData
+	return nil
+}
+
+// maxEip8130AuthProofBytes is a fail-fast upper bound, in bytes, on the length prefix of a
+// single EIP-8130 auth proof. It mirrors the Rust MAX_AUTH_PROOF_BYTES (= Channel max RLP
+// bytes); the real allocation guard is the subsequent io.ReadFull on the bounded reader,
+// which fails if fewer than n bytes remain.
+const maxEip8130AuthProofBytes = MaxSpanBatchElementCount
+
+func decodeEip8130Proof(r *bytes.Reader) ([]byte, error) {
+	n, err := binary.ReadUvarint(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read eip8130 auth data length: %w", err)
+	}
+	if n > maxEip8130AuthProofBytes {
+		return nil, ErrTooBigSpanBatchSize
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	proof := make([]byte, n)
+	if _, err := io.ReadFull(r, proof); err != nil {
+		return nil, fmt.Errorf("failed to read eip8130 auth data: %w", err)
+	}
+	return proof, nil
 }
 
 func (btx *spanBatchTxs) contractCreationCount() (uint64, error) {
@@ -271,8 +338,8 @@ func (btx *spanBatchTxs) recoverV(chainID *big.Int) error {
 				v.Add(v, big.NewInt(35))
 				v.Add(v, big.NewInt(int64(bit)))
 			}
-		case types.AccessListTxType, types.DynamicFeeTxType, types.SetCodeTxType:
-			// For non-legacy tx types, v is just the y-parity bit (0 or 1).
+		case types.AccessListTxType, types.DynamicFeeTxType, types.SetCodeTxType, types.Eip8130TxType:
+			// For non-legacy tx types v is just the y-parity bit.
 			v = big.NewInt(int64(bit))
 		default:
 			return fmt.Errorf("invalid tx type: %d", txType)
@@ -307,6 +374,9 @@ func (btx *spanBatchTxs) encode(w io.Writer) error {
 	if err := btx.encodeProtectedBits(w); err != nil {
 		return err
 	}
+	if err := btx.encodeEip8130AuthData(w); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -335,16 +405,29 @@ func (btx *spanBatchTxs) decode(r *bytes.Reader) error {
 	if err := btx.decodeProtectedBits(r); err != nil {
 		return err
 	}
+	if err := btx.decodeEip8130AuthData(r); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (btx *spanBatchTxs) fullTxs(chainID *big.Int) ([][]byte, error) {
 	var txs [][]byte
 	toIdx := 0
+	eip8130Idx := 0
 	for idx := 0; idx < int(btx.totalBlockTxCount); idx++ {
 		var stx spanBatchTx
 		if err := stx.UnmarshalBinary(btx.txDatas[idx]); err != nil {
 			return nil, err
+		}
+		if stx.Type() == types.Eip8130TxType {
+			if eip8130Idx >= len(btx.eip8130AuthData) {
+				return nil, errors.New("not enough eip8130 auth data")
+			}
+			inner := stx.inner.(*spanBatchEip8130TxData)
+			inner.senderProof = btx.eip8130AuthData[eip8130Idx].senderProof
+			inner.payerProof = btx.eip8130AuthData[eip8130Idx].payerProof
+			eip8130Idx++
 		}
 		nonce := btx.txNonces[idx]
 		gas := btx.txGases[idx]
@@ -391,6 +474,8 @@ func convertVToYParity(v *big.Int, txType int) (uint, error) {
 	case types.DynamicFeeTxType:
 		yParityBit = uint(bigs.Uint64Strict(v))
 	case types.SetCodeTxType:
+		yParityBit = uint(bigs.Uint64Strict(v))
+	case types.Eip8130TxType:
 		yParityBit = uint(bigs.Uint64Strict(v))
 	default:
 		return 0, fmt.Errorf("invalid tx type: %d", txType)
@@ -477,6 +562,21 @@ func (sbtx *spanBatchTxs) AddTxs(txs [][]byte, chainID *big.Int) error {
 		}
 		sbtx.txDatas = append(sbtx.txDatas, txData)
 		sbtx.txTypes = append(sbtx.txTypes, int(tx.Type()))
+		if tx.Type() == types.Eip8130TxType {
+			e := tx.Eip8130()
+			_, senderProof, err := splitEip8130Auth(e.SenderAuth, e.Sender != nil)
+			if err != nil {
+				return fmt.Errorf("failed to split eip8130 sender auth: %w", err)
+			}
+			_, payerProof, err := splitEip8130Auth(e.PayerAuth, e.Payer != nil)
+			if err != nil {
+				return fmt.Errorf("failed to split eip8130 payer auth: %w", err)
+			}
+			sbtx.eip8130AuthData = append(sbtx.eip8130AuthData, spanBatchEip8130AuthData{
+				senderProof: senderProof,
+				payerProof:  payerProof,
+			})
+		}
 	}
 	sbtx.totalBlockTxCount += totalBlockTxCount
 	return nil

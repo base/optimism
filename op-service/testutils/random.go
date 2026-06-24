@@ -296,6 +296,77 @@ func RandomSetCodeTx(rng *rand.Rand, signer types.Signer) *types.Transaction {
 	return tx
 }
 
+// RandomEip8130Tx builds a random EIP-8130 (0x7B) transaction. It varies the
+// configured/EOA sender path, optional payer, and metadata, and rotates account_changes
+// across all three AccountChange variants (Create / ConfigChange / Delegation) with
+// multi-phase calls mixing empty and non-empty data, so repeated trials exercise every
+// variant of the codec. The signer is used only for the chain ID; EIP-8130 is not signed.
+func RandomEip8130Tx(rng *rand.Rand, signer types.Signer) *types.Transaction {
+	tip := big.NewInt(rng.Int63n(10 * params.GWei))
+	txData := &types.Eip8130Tx{
+		ChainID:       signer.ChainID(),
+		NonceKey:      big.NewInt(rng.Int63()),
+		NonceSequence: rng.Uint64(),
+		Expiry:        rng.Uint64(),
+		GasTipCap:     tip,
+		GasFeeCap:     new(big.Int).Add(big.NewInt(rng.Int63()), tip),
+		GasLimit:      params.TxGas + uint64(rng.Int63n(2_000_000)),
+		Metadata:      RandomData(rng, rng.Intn(16)),
+	}
+	if RandomBool(rng) {
+		// configured path: 20-byte authenticator followed by proof bytes
+		sender := RandomAddress(rng)
+		txData.Sender = &sender
+		txData.SenderAuth = append(RandomAddress(rng).Bytes(), RandomData(rng, rng.Intn(8))...)
+	} else {
+		// EOA path: r||s||v proof only
+		txData.SenderAuth = RandomData(rng, 65)
+	}
+	if RandomBool(rng) {
+		payer := RandomAddress(rng)
+		txData.Payer = &payer
+		txData.PayerAuth = append(RandomAddress(rng).Bytes(), RandomData(rng, rng.Intn(8))...)
+	}
+	if RandomBool(rng) {
+		var change types.AccountChange
+		switch rng.Intn(3) {
+		case 0:
+			change.Create = &types.CreateEntry{
+				UserSalt: RandomHash(rng),
+				Code:     RandomData(rng, rng.Intn(8)),
+				InitialActors: []types.InitialActor{
+					{ActorID: RandomHash(rng), Authenticator: RandomAddress(rng)},
+				},
+			}
+		case 1:
+			change.ConfigChange = &types.ConfigChange{
+				ChainID:  signer.ChainID().Uint64(),
+				Sequence: rng.Uint64(),
+				ActorChanges: []types.ActorChange{
+					{ChangeType: types.ActorChangeAuthorize, ActorID: RandomHash(rng), Data: RandomData(rng, rng.Intn(8))},
+					{ChangeType: types.ActorChangeRevoke, ActorID: RandomHash(rng)},
+				},
+				Auth: RandomData(rng, rng.Intn(8)),
+			}
+		default:
+			change.Delegation = &types.Delegation{Target: RandomAddress(rng)}
+		}
+		txData.AccountChanges = []types.AccountChange{change}
+	}
+	if RandomBool(rng) {
+		txData.Calls = [][]types.Call{
+			{
+				{To: RandomAddress(rng), Data: nil},
+				{To: RandomAddress(rng), Data: RandomData(rng, 1+rng.Intn(8))},
+			},
+			{
+				{To: RandomAddress(rng), Data: RandomData(rng, 1+rng.Intn(8))},
+			},
+		}
+	}
+	return types.NewTx(txData)
+}
+
 func RandomReceipt(rng *rand.Rand, signer types.Signer, tx *types.Transaction, txIndex uint64, cumulativeGasUsed uint64) *types.Receipt {
 	gasUsed := params.TxGas + uint64(rng.Int63n(int64(tx.Gas()-params.TxGas+1)))
 	logs := make([]*types.Log, rng.Intn(10))

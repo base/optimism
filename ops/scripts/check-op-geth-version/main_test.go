@@ -11,6 +11,8 @@ func TestRun(t *testing.T) {
 	tests := map[string]string{
 		"valid":                 "",
 		"valid-rc":              "",
+		"valid-base-fork":       "",
+		"valid-base-eip8130":    "",
 		"invalid-version":       "invalid op-geth version",
 		"invalid-geth-encoding": "invalid op-geth version",
 		"wrong-replacement":     "must point to github.com/ethereum-optimism/op-geth",
