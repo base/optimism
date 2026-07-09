@@ -296,7 +296,7 @@ func RandomSetCodeTx(rng *rand.Rand, signer types.Signer) *types.Transaction {
 	return tx
 }
 
-// RandomEip8130Tx builds a random EIP-8130 (0x7B) transaction. It varies the
+// RandomEip8130Tx builds a random EIP-8130 (0x79) transaction. It varies the
 // configured/EOA sender path, optional payer, and metadata, and rotates account_changes
 // across all three AccountChange variants (Create / ConfigChange / Delegation) with
 // multi-phase calls mixing empty and non-empty data, so repeated trials exercise every

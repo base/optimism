@@ -569,7 +569,7 @@ func TestDecodeEip8130ProofTruncatedBody(t *testing.T) {
 }
 
 // TestFullTxsNotEnoughEip8130AuthData locks the fullTxs guard that the per-tx
-// eip8130_auth_data column must hold an entry for every 0x7B tx in txDatas. It takes a
+// eip8130_auth_data column must hold an entry for every 0x79 tx in txDatas. It takes a
 // valid round-trippable span batch and drops the auth-data column.
 func TestFullTxsNotEnoughEip8130AuthData(t *testing.T) {
 	chainID := big.NewInt(8453)
@@ -632,7 +632,7 @@ func mustSignTx(t *testing.T, signer types.Signer, key *ecdsa.PrivateKey, txData
 	return tx
 }
 
-// TestSpanBatchEip8130RoundTrip drives every EIP-8130 (0x7B) shape through the full
+// TestSpanBatchEip8130RoundTrip drives every EIP-8130 (0x79) shape through the full
 // span-batch tx codec (encode -> decode -> recoverV -> fullTxs) and asserts each tx is
 // reconstructed byte-for-byte, both in isolation and interleaved with legacy/1559/7702
 // txs to exercise column alignment.

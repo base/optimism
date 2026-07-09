@@ -28,7 +28,7 @@ type spanBatchTxs struct {
 	txTos                []common.Address
 	txDatas              []hexutil.Bytes
 	protectedBits        *big.Int                   // standard span-batch bitlist
-	eip8130AuthData      []spanBatchEip8130AuthData // trailing column: one auth-proof bundle per 0x7B tx, in tx order
+	eip8130AuthData      []spanBatchEip8130AuthData // trailing column: one auth-proof bundle per 0x79 tx, in tx order
 
 	// intermediate variables which can be recovered
 	txTypes            []int
@@ -41,7 +41,7 @@ type spanBatchSignature struct {
 	s *uint256.Int
 }
 
-// spanBatchEip8130AuthData holds the high-entropy EIP-8130 auth proofs for one 0x7B tx.
+// spanBatchEip8130AuthData holds the high-entropy EIP-8130 auth proofs for one 0x79 tx.
 type spanBatchEip8130AuthData struct {
 	senderProof []byte
 	payerProof  []byte
