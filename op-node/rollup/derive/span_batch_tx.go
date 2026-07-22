@@ -120,6 +120,25 @@ func joinEip8130Auth(authenticator, proof []byte, configured bool) []byte {
 	return append(append([]byte(nil), authenticator...), proof...)
 }
 
+// checkEip8130Authenticator enforces the decode-side invariant binding an actor's
+// presence to the length of its authenticator column: a configured actor carries
+// exactly the 20-byte leading account address, an EOA / self-pay actor carries none.
+// This is the counterpart of the split splitEip8130Auth performs on the encode side,
+// rejecting a span batch whose columns disagree instead of silently reconstructing a
+// corrupt auth blob in convertToFullTx.
+func checkEip8130Authenticator(actor string, authenticator []byte, configured bool) error {
+	if configured {
+		if len(authenticator) != common.AddressLength {
+			return fmt.Errorf("eip8130 %s authenticator: configured actor requires %d bytes, got %d", actor, common.AddressLength, len(authenticator))
+		}
+		return nil
+	}
+	if len(authenticator) != 0 {
+		return fmt.Errorf("eip8130 %s authenticator: EOA actor requires 0 bytes, got %d", actor, len(authenticator))
+	}
+	return nil
+}
+
 // Type returns the transaction type.
 func (tx *spanBatchTx) Type() uint8 {
 	return tx.inner.txType()
@@ -180,6 +199,12 @@ func (tx *spanBatchTx) decodeTyped(b []byte) (spanBatchTxData, error) {
 		err := rlp.DecodeBytes(b[1:], &inner)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode spanBatchEip8130TxData: %w", err)
+		}
+		if err := checkEip8130Authenticator("sender", inner.SenderAuthenticator, inner.Sender != nil); err != nil {
+			return nil, err
+		}
+		if err := checkEip8130Authenticator("payer", inner.PayerAuthenticator, inner.Payer != nil); err != nil {
+			return nil, err
 		}
 		return &inner, nil
 	default:
