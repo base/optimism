@@ -156,6 +156,60 @@ func TestSpanBatchTxSetCodeInvalidTo(t *testing.T) {
 	require.ErrorContains(t, err, "to address is required for SetCodeTx")
 }
 
+func TestSpanBatchTxEip8130ValidityWindowWire(t *testing.T) {
+	inner := spanBatchEip8130TxData{
+		NonceKey:    big.NewInt(0),
+		ValidAfter:  42,
+		ValidBefore: 99,
+		GasTipCap:   big.NewInt(1),
+		GasFeeCap:   big.NewInt(2),
+	}
+	var buf bytes.Buffer
+	buf.WriteByte(types.Eip8130TxType)
+	require.NoError(t, rlp.Encode(&buf, &inner))
+	require.Equal(t, []byte{
+		types.Eip8130TxType,
+		0xcc, // list, 12 payload bytes
+		0x80, // sender = nil
+		0x80, // nonceKey = 0
+		0x2a, // validAfter = 42
+		0x63, // validBefore = 99
+		0x01, // gasTipCap = 1
+		0x02, // gasFeeCap = 2
+		0x80, // payer = nil
+		0xc0, // accountChanges = empty list
+		0xc0, // calls = empty list
+		0x80, // metadata = empty
+		0x80, // senderAuthenticator = empty
+		0x80, // payerAuthenticator = empty
+	}, buf.Bytes())
+
+	var sbtx spanBatchTx
+	decoded, err := sbtx.decodeTyped(buf.Bytes())
+	require.NoError(t, err)
+	got := decoded.(*spanBatchEip8130TxData)
+	require.Equal(t, uint64(42), got.ValidAfter)
+	require.Equal(t, uint64(99), got.ValidBefore)
+
+	legacy := []byte{
+		types.Eip8130TxType,
+		0xcb, // list, 11 payload bytes
+		0x80, // sender = nil
+		0x80, // nonceKey = 0
+		0x2a, // legacy expiry = 42
+		0x01, // gasTipCap = 1
+		0x02, // gasFeeCap = 2
+		0x80, // payer = nil
+		0xc0, // accountChanges = empty list
+		0xc0, // calls = empty list
+		0x80, // metadata = empty
+		0x80, // senderAuthenticator = empty
+		0x80, // payerAuthenticator = empty
+	}
+	_, err = sbtx.decodeTyped(legacy)
+	require.Error(t, err)
+}
+
 // TestSpanBatchTxEip8130AuthBinding locks the decode-side invariant that ties an actor's
 // presence to the length of its authenticator column: a configured actor must carry a
 // 20-byte authenticator and an EOA / self-pay actor must carry none. Each case breaks

@@ -64,8 +64,8 @@ github.com/armon/go-metrics v0.4.1 h1:hR91U9KYmb6bLBYLQjyM+3j+rcd/UhE+G78SFnF8gJ
 github.com/armon/go-metrics v0.4.1/go.mod h1:E6amYzXo6aW1tqzoZGT755KkbgrJsSdpwZ+3JqfkOG4=
 github.com/base/go-bip39 v1.1.0 h1:ely6zK09KaQbfX8wpcmN4pRXy0SbbqMT2QF45P1BNh0=
 github.com/base/go-bip39 v1.1.0/go.mod h1:grZZXX8gYycovDC4cLS/RS0DmctofwHN+MUhedYCbO0=
-github.com/base/op-geth v1.101701.0-rc.3-eip8130.4 h1:Yb/Ehw5S8bTAsWGP5WJQVQSmwjk8KY+83KufKXJRj20=
-github.com/base/op-geth v1.101701.0-rc.3-eip8130.4/go.mod h1:Jws4nBy37/q7vgx8i/nC/dDTSYQbPIsW/ihwOAiIqHE=
+github.com/base/op-geth v1.101701.0-rc.3-eip8130.5 h1:1lSN8zO3ffuU5IJrB1MFufpAwlbS3PQRLmBYvreQOu0=
+github.com/base/op-geth v1.101701.0-rc.3-eip8130.5/go.mod h1:Jws4nBy37/q7vgx8i/nC/dDTSYQbPIsW/ihwOAiIqHE=
 github.com/benbjohnson/clock v1.1.0/go.mod h1:J11/hYXuz8f4ySSvYwY0FKfm+ezbsZBKZxNJlLklBHA=
 github.com/benbjohnson/clock v1.3.0/go.mod h1:J11/hYXuz8f4ySSvYwY0FKfm+ezbsZBKZxNJlLklBHA=
 github.com/benbjohnson/clock v1.3.5 h1:VvXlSJBzZpA/zum6Sj74hxwYI2DIxRWuNIoXAzHZz5o=

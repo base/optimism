@@ -24,14 +24,14 @@ const (
 //   - 2 digits for geth minor version (zero-padded)
 //   - 2 digits for geth patch version (zero-padded)
 //
-// An optional trailing fork suffix (e.g. -eip8130) is allowed for fork builds that
-// carry changes not yet upstreamed.
+// An optional trailing fork suffix (e.g. -eip8130 or -eip8130.5) is allowed for
+// fork builds that carry changes not yet upstreamed.
 //
 // Examples:
-//   - v1.101407.0              -> geth v1.14.7
-//   - v1.101605.0-rc.2         -> geth v1.16.5
-//   - v1.101605.0-rc.2-eip8130 -> geth v1.16.5, eip8130 fork build
-var opGethVersionPattern = regexp.MustCompile(`^v\d+\.\d{6}\.\d+(-rc\.\d+)?(-eip8130)?$`)
+//   - v1.101407.0                -> geth v1.14.7
+//   - v1.101605.0-rc.2           -> geth v1.16.5
+//   - v1.101605.0-rc.2-eip8130.5 -> geth v1.16.5, eip8130 fork build 5
+var opGethVersionPattern = regexp.MustCompile(`^v\d+\.\d{6}\.\d+(-rc\.\d+)?(-eip8130(\.\d+)?)?$`)
 
 func main() {
 	if err := run("."); err != nil {

@@ -63,7 +63,8 @@ type spanBatchEip8130TxData struct {
 	// nonce/gas columns; to/value/v/r/s are always nil/zero for EIP-8130.
 	Sender              *common.Address `rlp:"nil"` // nil means the empty EOA path
 	NonceKey            *big.Int
-	Expiry              uint64
+	ValidAfter          uint64 // inclusive lower bound in Unix milliseconds; zero disables it
+	ValidBefore         uint64 // exclusive upper bound in Unix milliseconds; zero disables it
 	GasTipCap           *big.Int
 	GasFeeCap           *big.Int
 	Payer               *common.Address `rlp:"nil"` // nil means self-pay
@@ -310,7 +311,8 @@ func (tx *spanBatchTx) convertToFullTx(nonce, gas uint64, to *common.Address, ch
 			Sender:         batchTxInner.Sender,
 			NonceKey:       batchTxInner.NonceKey,
 			NonceSequence:  nonce,
-			Expiry:         batchTxInner.Expiry,
+			ValidAfter:     batchTxInner.ValidAfter,
+			ValidBefore:    batchTxInner.ValidBefore,
 			GasTipCap:      batchTxInner.GasTipCap,
 			GasFeeCap:      batchTxInner.GasFeeCap,
 			GasLimit:       gas,
@@ -374,7 +376,8 @@ func newSpanBatchTx(tx *types.Transaction) (*spanBatchTx, error) {
 		inner = &spanBatchEip8130TxData{
 			Sender:              e.Sender,
 			NonceKey:            e.NonceKey,
-			Expiry:              e.Expiry,
+			ValidAfter:          e.ValidAfter,
+			ValidBefore:         e.ValidBefore,
 			GasTipCap:           e.GasTipCap,
 			GasFeeCap:           e.GasFeeCap,
 			Payer:               e.Payer,
