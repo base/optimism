@@ -298,9 +298,10 @@ func RandomSetCodeTx(rng *rand.Rand, signer types.Signer) *types.Transaction {
 
 // RandomEip8130Tx builds a random EIP-8130 (0x79) transaction. It varies the
 // configured/EOA sender path, optional payer, and metadata, and rotates account_changes
-// across all three AccountChange variants (Create / ConfigChange / Delegation) with
-// multi-phase calls mixing empty and non-empty data, so repeated trials exercise every
-// variant of the codec. The signer is used only for the chain ID; EIP-8130 is not signed.
+// across all three AccountChange variants (Create / ConfigChange / Delegation). Config
+// changes cover both replay channels and all five signed operation types. Multi-phase
+// calls mix empty and non-empty data, so repeated trials exercise every codec variant.
+// The signer is used only for the chain ID; EIP-8130 is not signed.
 func RandomEip8130Tx(rng *rand.Rand, signer types.Signer) *types.Transaction {
 	tip := big.NewInt(rng.Int63n(10 * params.GWei))
 	txData := &types.Eip8130Tx{
@@ -336,18 +337,43 @@ func RandomEip8130Tx(rng *rand.Rand, signer types.Signer) *types.Transaction {
 				UserSalt: RandomHash(rng),
 				Code:     RandomData(rng, rng.Intn(8)),
 				InitialActors: []types.InitialActor{
-					{ActorID: RandomHash(rng), Authenticator: RandomAddress(rng)},
+					{
+						ActorID:       RandomHash(rng),
+						Authenticator: RandomAddress(rng),
+						// Exercise the finalized uint16 wire width while keeping
+						// the POLICY bit clear, so empty policyData is valid.
+						Scope: uint16(rng.Uint32()) &^ 0x0002,
+					},
 				},
 			}
 		case 1:
-			change.ConfigChange = &types.ConfigChange{
-				ChainID:  signer.ChainID().Uint64(),
-				Sequence: rng.Uint64(),
-				ActorChanges: []types.ActorChange{
-					{ChangeType: types.ActorChangeAuthorize, ActorID: RandomHash(rng), Data: RandomData(rng, rng.Intn(8))},
-					{ChangeType: types.ActorChangeRevoke, ActorID: RandomHash(rng)},
-				},
-				Auth: RandomData(rng, rng.Intn(8)),
+			channel := types.AccountChangeChannelLocal
+			if RandomBool(rng) {
+				channel = types.AccountChangeChannelMultichain
+			}
+			changes := []types.SignedChange{
+				{ChangeType: types.ChangeTypeAuthorizeActor, Payload: RandomData(rng, rng.Intn(8))},
+				{ChangeType: types.ChangeTypeRevokeActor, Payload: RandomHash(rng).Bytes()},
+				{ChangeType: types.ChangeTypeIncrementLocalEpoch},
+			}
+			if channel == types.AccountChangeChannelLocal {
+				// Lock and unlock are Local-only standalone batches.
+				switch rng.Intn(3) {
+				case 1:
+					unlockDelay := uint16(rng.Uint32())
+					lockPayload := make([]byte, 32) // abi.encode(uint16)
+					lockPayload[30] = byte(unlockDelay >> 8)
+					lockPayload[31] = byte(unlockDelay)
+					changes = []types.SignedChange{{ChangeType: types.ChangeTypeLock, Payload: lockPayload}}
+				case 2:
+					changes = []types.SignedChange{{ChangeType: types.ChangeTypeUnlock}}
+				}
+			}
+			change.ConfigChange = &types.SignedAccountChanges{
+				Channel:   channel,
+				Sequence:  rng.Uint64(),
+				Changes:   changes,
+				Signature: RandomData(rng, rng.Intn(8)),
 			}
 		default:
 			change.Delegation = &types.Delegation{Target: RandomAddress(rng)}

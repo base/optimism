@@ -651,6 +651,8 @@ func TestSpanBatchEip8130RoundTrip(t *testing.T) {
 	proofB := []byte{0x05, 0x06, 0x07}        // proof tail B
 	addrA := common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 	addrB := common.HexToAddress("0x000000000000000000000000000000000000bbbb")
+	lockPayload := make([]byte, 32) // abi.encode(uint16(1))
+	lockPayload[31] = 0x01
 
 	variants := []struct {
 		name string
@@ -713,17 +715,18 @@ func TestSpanBatchEip8130RoundTrip(t *testing.T) {
 					Code:     []byte{0x60, 0x80, 0x60, 0x40},
 					InitialActors: []types.InitialActor{
 						{ActorID: common.Hash{0x33}, Authenticator: common.Address{0xbb}},
-						{ActorID: common.Hash{0x34}, Authenticator: common.Address{0xbc}},
+						{ActorID: common.Hash{0x34}, Authenticator: common.Address{0xbc}, Scope: 0x1234},
 					},
 				}},
-				{ConfigChange: &types.ConfigChange{
-					ChainID:  8453,
+				{ConfigChange: &types.SignedAccountChanges{
+					Channel:  types.AccountChangeChannelMultichain,
 					Sequence: 5,
-					ActorChanges: []types.ActorChange{
-						{ChangeType: types.ActorChangeAuthorize, ActorID: common.Hash{0x41}, Data: []byte{0xaa, 0xbb}},
-						{ChangeType: types.ActorChangeRevoke, ActorID: common.Hash{0x42}},
+					Changes: []types.SignedChange{
+						{ChangeType: types.ChangeTypeAuthorizeActor, Payload: []byte{0xaa, 0xbb}},
+						{ChangeType: types.ChangeTypeRevokeActor, Payload: common.Hash{0x42}.Bytes()},
+						{ChangeType: types.ChangeTypeIncrementLocalEpoch},
 					},
-					Auth: []byte{0xde, 0xad, 0xbe, 0xef},
+					Signature: []byte{0xde, 0xad, 0xbe, 0xef},
 				}},
 				{Delegation: &types.Delegation{Target: common.Address{0xdd}}},
 			},
@@ -737,6 +740,38 @@ func TestSpanBatchEip8130RoundTrip(t *testing.T) {
 				},
 			},
 			Metadata:   []byte{0x09, 0x08, 0x07},
+			SenderAuth: eoaAuth,
+		})},
+		{"lock_config_change", mk(&types.Eip8130Tx{
+			NonceKey:      big.NewInt(12),
+			NonceSequence: 13,
+			ValidAfter:    500,
+			ValidBefore:   600,
+			GasTipCap:     big.NewInt(8),
+			GasFeeCap:     big.NewInt(14),
+			GasLimit:      50000,
+			AccountChanges: []types.AccountChange{{ConfigChange: &types.SignedAccountChanges{
+				Channel:   types.AccountChangeChannelLocal,
+				Sequence:  6,
+				Changes:   []types.SignedChange{{ChangeType: types.ChangeTypeLock, Payload: lockPayload}},
+				Signature: []byte{0xca, 0xfe},
+			}}},
+			SenderAuth: eoaAuth,
+		})},
+		{"unlock_config_change", mk(&types.Eip8130Tx{
+			NonceKey:      big.NewInt(14),
+			NonceSequence: 15,
+			ValidAfter:    600,
+			ValidBefore:   700,
+			GasTipCap:     big.NewInt(9),
+			GasFeeCap:     big.NewInt(15),
+			GasLimit:      50000,
+			AccountChanges: []types.AccountChange{{ConfigChange: &types.SignedAccountChanges{
+				Channel:   types.AccountChangeChannelLocal,
+				Sequence:  7,
+				Changes:   []types.SignedChange{{ChangeType: types.ChangeTypeUnlock}},
+				Signature: []byte{0xba, 0xbe},
+			}}},
 			SenderAuth: eoaAuth,
 		})},
 		{"minimal", mk(&types.Eip8130Tx{
