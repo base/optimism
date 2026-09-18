@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 )
 
 const validatorMnemonic = "test test test test test test test test test test test junk"
@@ -20,6 +21,10 @@ func command(name string, args ...string) error {
 }
 
 func consensus(l1Dir string, values map[string]string) error {
+	validatorCount, err := strconv.ParseUint(env("BASE_DEVNET_VALIDATOR_COUNT", "1"), 10, 64)
+	if err != nil || validatorCount == 0 {
+		return fmt.Errorf("BASE_DEVNET_VALIDATOR_COUNT must be a positive integer")
+	}
 	cl := filepath.Join(l1Dir, "cl")
 	config, err := template("l1-cl-config.yaml.template", values)
 	if err != nil {
@@ -28,7 +33,7 @@ func consensus(l1Dir string, values map[string]string) error {
 	if err := write(filepath.Join(cl, "config.yaml"), config); err != nil {
 		return err
 	}
-	if err := write(filepath.Join(cl, "mnemonics.yaml"), []byte("- mnemonic: \""+validatorMnemonic+"\"\n  count: 1\n")); err != nil {
+	if err := write(filepath.Join(cl, "mnemonics.yaml"), []byte(fmt.Sprintf("- mnemonic: %q\n  count: %d\n", validatorMnemonic, validatorCount))); err != nil {
 		return err
 	}
 	if err := command("eth-genesis-state-generator", "beaconchain", "--eth1-config", filepath.Join(l1Dir, "el/genesis.json"), "--config", filepath.Join(cl, "config.yaml"), "--mnemonics", filepath.Join(cl, "mnemonics.yaml"), "--state-output", filepath.Join(cl, "genesis.ssz")); err != nil {
@@ -39,7 +44,7 @@ func consensus(l1Dir string, values map[string]string) error {
 			return err
 		}
 	}
-	if err := command("eth2-val-tools", "keystores", "--insecure", "--source-mnemonic="+validatorMnemonic, "--source-min=0", "--source-max=1", "--out-loc="+filepath.Join(cl, "validator_keys")); err != nil {
+	if err := command("eth2-val-tools", "keystores", "--insecure", "--source-mnemonic="+validatorMnemonic, "--source-min=0", "--source-max="+strconv.FormatUint(validatorCount, 10), "--out-loc="+filepath.Join(cl, "validator_keys")); err != nil {
 		return err
 	}
 	entries, err := os.ReadDir(filepath.Join(cl, "validator_keys/keys"))

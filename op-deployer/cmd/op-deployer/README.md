@@ -17,6 +17,11 @@ must provide `eth-genesis-state-generator` and `eth2-val-tools` on PATH for beac
 genesis and validator keystores. No setup shell scripts, jq, envsubst, or separate
 op-deployer process are used.
 
+`BASE_DEVNET_VALIDATOR_COUNT` selects the number of validators in beacon genesis
+and the matching validator keystores. It defaults to `1` and must be a positive
+decimal integer. Set it before generating fresh state; completed setup is reused
+without regenerating validators.
+
 The embedded templates preserve Base's current prefunding and chain settings.
 The binary merges deployed L1 allocations, sets the L1 starting reference,
 patches activation admin and Isthmus/Azul/Beryl/Cobalt/Denim/Zenith schedules,
