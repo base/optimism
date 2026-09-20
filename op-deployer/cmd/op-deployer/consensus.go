@@ -20,7 +20,7 @@ func command(name string, args ...string) error {
 	return nil
 }
 
-func consensus(l1Dir string, values map[string]string) error {
+func consensus(l1Dir string, values map[string]string, forks *futureForks) error {
 	validatorCount, err := strconv.ParseUint(env("BASE_DEVNET_VALIDATOR_COUNT", "1"), 10, 64)
 	if err != nil || validatorCount == 0 {
 		return fmt.Errorf("BASE_DEVNET_VALIDATOR_COUNT must be a positive integer")
@@ -29,6 +29,9 @@ func consensus(l1Dir string, values map[string]string) error {
 	config, err := template("l1-cl-config.yaml.template", values)
 	if err != nil {
 		return err
+	}
+	if forks != nil {
+		config = append(config, []byte(fmt.Sprintf("\nGLOAS_FORK_VERSION: 0x80000000\nGLOAS_FORK_EPOCH: %d\n", forks.gloasEpoch))...)
 	}
 	if err := write(filepath.Join(cl, "config.yaml"), config); err != nil {
 		return err

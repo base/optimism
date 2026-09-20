@@ -36,7 +36,7 @@ func TestConsensusValidatorCount(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := consensus(root, nil); err != nil {
+			if err := consensus(root, nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			mnemonics, err := os.ReadFile(filepath.Join(cl, "mnemonics.yaml"))
@@ -70,7 +70,7 @@ func TestConsensusRejectsInvalidValidatorCount(t *testing.T) {
 		t.Run(value, func(t *testing.T) {
 			t.Setenv("BASE_DEVNET_VALIDATOR_COUNT", value)
 			root := t.TempDir()
-			err := consensus(root, nil)
+			err := consensus(root, nil, nil)
 			if err == nil || err.Error() != "BASE_DEVNET_VALIDATOR_COUNT must be a positive integer" {
 				t.Fatalf("expected validator count validation error, got %v", err)
 			}
