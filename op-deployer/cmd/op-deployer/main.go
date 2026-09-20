@@ -29,6 +29,11 @@ var assets embed.FS
 
 type document map[string]json.RawMessage
 
+type futureForks struct {
+	amsterdamTime uint64
+	gloasEpoch    uint64
+}
+
 func main() {
 	if err := run(); err != nil {
 		if err != flag.ErrHelp {
@@ -91,6 +96,74 @@ func template(name string, values map[string]string) ([]byte, error) {
 	})), nil
 }
 
+func readFutureForks(getenv func(string) string, genesisTime, slotDuration uint64) (*futureForks, error) {
+	amsterdam := getenv("BASE_DEVNET_AMSTERDAM_TIME")
+	gloas := getenv("BASE_DEVNET_GLOAS_EPOCH")
+	if amsterdam == "" && gloas == "" {
+		return nil, nil
+	}
+	if amsterdam == "" || gloas == "" {
+		return nil, fmt.Errorf("BASE_DEVNET_AMSTERDAM_TIME and BASE_DEVNET_GLOAS_EPOCH must be set together")
+	}
+	amsterdamTime, err := strconv.ParseUint(amsterdam, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("BASE_DEVNET_AMSTERDAM_TIME must be an unsigned integer")
+	}
+	gloasEpoch, err := strconv.ParseUint(gloas, 10, 64)
+	if err != nil || gloasEpoch == 0 {
+		return nil, fmt.Errorf("BASE_DEVNET_GLOAS_EPOCH must be a positive integer")
+	}
+	expected, overflow := gloasEpoch*8, false
+	if expected/8 != gloasEpoch {
+		overflow = true
+	} else {
+		expected *= slotDuration
+		if slotDuration != 0 && expected/slotDuration != gloasEpoch*8 {
+			overflow = true
+		} else if expected > ^uint64(0)-genesisTime {
+			overflow = true
+		} else {
+			expected += genesisTime
+		}
+	}
+	if overflow || amsterdamTime != expected {
+		return nil, fmt.Errorf("Amsterdam time must equal the Gloas epoch boundary")
+	}
+	return &futureForks{amsterdamTime: amsterdamTime, gloasEpoch: gloasEpoch}, nil
+}
+
+func applyFutureForks(genesis any, forks *futureForks) (document, document, error) {
+	genesisDoc, err := object(genesis)
+	if err != nil {
+		return nil, nil, err
+	}
+	var config document
+	if err := json.Unmarshal(genesisDoc["config"], &config); err != nil {
+		return nil, nil, err
+	}
+	if forks != nil {
+		if err := set(config, "amsterdamTime", forks.amsterdamTime); err != nil {
+			return nil, nil, err
+		}
+		var schedule document
+		if err := json.Unmarshal(config["blobSchedule"], &schedule); err != nil {
+			return nil, nil, err
+		}
+		bpo2, ok := schedule["bpo2"]
+		if !ok {
+			return nil, nil, fmt.Errorf("BPO2 blob schedule is missing")
+		}
+		schedule["amsterdam"] = bpo2
+		if err := set(config, "blobSchedule", schedule); err != nil {
+			return nil, nil, err
+		}
+	}
+	if err := set(genesisDoc, "config", config); err != nil {
+		return nil, nil, err
+	}
+	return genesisDoc, config, nil
+}
+
 func run() error {
 	if err := parseArgs(os.Args[1:]); err != nil {
 		return err
@@ -122,6 +195,14 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("invalid genesis timestamp: %w", err)
 	}
+	slotDuration, err := strconv.ParseUint(env("SLOT_DURATION", "12"), 10, 64)
+	if err != nil || slotDuration == 0 {
+		return fmt.Errorf("SLOT_DURATION must be a positive integer")
+	}
+	future, err := readFutureForks(os.Getenv, timestamp, slotDuration)
+	if err != nil {
+		return err
+	}
 	l1ID := env("CHAIN_ID", env("L1_CHAIN_ID", "1337"))
 	l2ID, err := strconv.ParseUint(env("L2_CHAIN_ID", "84538453"), 10, 64)
 	if err != nil {
@@ -130,7 +211,7 @@ func run() error {
 	values := map[string]string{
 		"CHAIN_ID": l1ID, "L1_CHAIN_ID": l1ID,
 		"GENESIS_TIME": strconv.FormatUint(timestamp, 10), "GENESIS_TIME_HEX": fmt.Sprintf("0x%x", timestamp),
-		"BALANCE": "0xd3c21bcecceda1000000", "SLOT_DURATION": env("SLOT_DURATION", "12"),
+		"BALANCE": "0xd3c21bcecceda1000000", "SLOT_DURATION": strconv.FormatUint(slotDuration, 10),
 	}
 	admin := env("L2_ACTIVATION_ADMIN_ADDR", os.Getenv("SEQUENCER_ADDR"))
 	if !common.IsHexAddress(admin) {
@@ -228,12 +309,16 @@ func run() error {
 		ImplementationsContracts: *st.ImplementationsDeployment,
 		OpChainContracts:         st.Chains[0].OpChainContracts,
 	}
+	l1Doc, l1Config, err := applyFutureForks(&l1, future)
+	if err != nil {
+		return err
+	}
 
 	for _, output := range []struct {
 		path  string
 		value any
 	}{
-		{filepath.Join(l1Dir, "el/genesis.json"), &l1}, {filepath.Join(l1Dir, "el/chain-config.json"), l1.Config},
+		{filepath.Join(l1Dir, "el/genesis.json"), l1Doc}, {filepath.Join(l1Dir, "el/chain-config.json"), l1Config},
 		{filepath.Join(l2Dir, "genesis.json"), l2Doc}, {filepath.Join(l2Dir, "rollup.json"), rollupDoc},
 		{filepath.Join(l2Dir, "l1-addresses.json"), l1Addresses},
 	} {
@@ -264,7 +349,7 @@ func run() error {
 	}
 	fmt.Fprintf(os.Stderr, "base_finalize_and_export=%s\n", time.Since(start))
 	start = time.Now()
-	if err := consensus(l1Dir, values); err != nil {
+	if err := consensus(l1Dir, values, future); err != nil {
 		return err
 	}
 	if err := write(filepath.Join(l2Dir, ".setup-complete"), nil); err != nil {
