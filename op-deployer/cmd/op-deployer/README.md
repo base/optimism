@@ -22,6 +22,10 @@ and the matching validator keystores. It defaults to `1` and must be a positive
 decimal integer. Set it before generating fresh state; completed setup is reused
 without regenerating validators.
 
+`BASE_DEVNET_AMSTERDAM_TIME` and `BASE_DEVNET_GLOAS_EPOCH` optionally configure
+a matched future EL/CL fork. They must be set together, and Amsterdam must equal
+the Gloas epoch boundary using the minimal preset's eight slots per epoch.
+
 The embedded templates preserve Base's current prefunding and chain settings.
 The binary merges deployed L1 allocations, sets the L1 starting reference,
 patches activation admin and Isthmus/Azul/Beryl/Cobalt/Denim/Zenith schedules,
