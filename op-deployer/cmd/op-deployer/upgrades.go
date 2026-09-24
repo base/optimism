@@ -12,7 +12,7 @@ type upgrades map[string]uint64
 
 func readUpgrades(getenv func(string) string) (upgrades, error) {
 	result := make(upgrades)
-	for _, name := range []string{"isthmus", "azul", "beryl", "cobalt", "denim", "zenith"} {
+	for _, name := range []string{"isthmus", "azul", "beryl", "cobalt", "denim", "everest", "zenith"} {
 		key := "L2_BASE_" + strings.ToUpper(name) + "_BLOCK"
 		if name == "isthmus" {
 			key = "L2_ISTHMUS_BLOCK"

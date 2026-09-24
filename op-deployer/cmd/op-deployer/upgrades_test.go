@@ -18,6 +18,7 @@ func TestUpgradeSchedule(t *testing.T) {
 		{"genesis", map[string]string{"L2_BASE_AZUL_BLOCK": "0"}, false, "azul", 1000},
 		{"before denim", map[string]string{"L2_BASE_AZUL_BLOCK": "20", "L2_BASE_DENIM_BLOCK": "25"}, false, "azul", 1040},
 		{"after denim", map[string]string{"L2_BASE_ZENITH_BLOCK": "100", "L2_BASE_DENIM_BLOCK": "25"}, false, "zenith", 1065},
+		{"everest", map[string]string{"L2_BASE_EVEREST_BLOCK": "100", "L2_BASE_DENIM_BLOCK": "25"}, false, "everest", 1065},
 		{"misaligned", map[string]string{"L2_BASE_ZENITH_BLOCK": "26", "L2_BASE_DENIM_BLOCK": "25"}, true, "", 0},
 		{"negative", map[string]string{"L2_BASE_AZUL_BLOCK": "-1"}, true, "", 0},
 		{"noninteger", map[string]string{"L2_ISTHMUS_BLOCK": "1.5"}, true, "", 0},
