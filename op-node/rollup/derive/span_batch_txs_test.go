@@ -733,10 +733,10 @@ func TestSpanBatchEip8130RoundTrip(t *testing.T) {
 			Calls: [][]types.Call{
 				{
 					{To: common.Address{0xaa}, Data: []byte{}},
-					{To: common.Address{0xab}, Data: []byte{0xde, 0xad, 0xbe, 0xef}},
+					{To: common.Address{0xab}, Value: big.NewInt(1_000_000_000_000_000_000), Data: []byte{0xde, 0xad, 0xbe, 0xef}},
 				},
 				{
-					{To: common.Address{0xac}, Data: []byte{0x01}},
+					{To: common.Address{0xac}, Value: new(big.Int).Lsh(big.NewInt(1), 255), Data: []byte{0x01}},
 				},
 			},
 			Metadata:   []byte{0x09, 0x08, 0x07},

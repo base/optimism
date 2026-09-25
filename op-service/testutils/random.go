@@ -300,7 +300,8 @@ func RandomSetCodeTx(rng *rand.Rand, signer types.Signer) *types.Transaction {
 // configured/EOA sender path, optional payer, and metadata, and rotates account_changes
 // across all three AccountChange variants (Create / ConfigChange / Delegation). Config
 // changes cover both replay channels and all five signed operation types. Multi-phase
-// calls mix empty and non-empty data, so repeated trials exercise every codec variant.
+// calls mix zero and non-zero values and empty and non-empty data, so repeated trials
+// exercise every codec variant.
 // The signer is used only for the chain ID; EIP-8130 is not signed.
 func RandomEip8130Tx(rng *rand.Rand, signer types.Signer) *types.Transaction {
 	tip := big.NewInt(rng.Int63n(10 * params.GWei))
@@ -384,10 +385,14 @@ func RandomEip8130Tx(rng *rand.Rand, signer types.Signer) *types.Transaction {
 		txData.Calls = [][]types.Call{
 			{
 				{To: RandomAddress(rng), Data: nil},
-				{To: RandomAddress(rng), Data: RandomData(rng, 1+rng.Intn(8))},
+				{To: RandomAddress(rng), Value: RandomETH(rng, 100), Data: RandomData(rng, 1+rng.Intn(8))},
 			},
 			{
-				{To: RandomAddress(rng), Data: RandomData(rng, 1+rng.Intn(8))},
+				{
+					To:    RandomAddress(rng),
+					Value: new(big.Int).SetBytes(RandomData(rng, 1+rng.Intn(32))),
+					Data:  RandomData(rng, 1+rng.Intn(8)),
+				},
 			},
 		}
 	}
