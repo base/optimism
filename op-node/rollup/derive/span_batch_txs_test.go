@@ -2,8 +2,6 @@ package derive
 
 import (
 	"bytes"
-	"crypto/ecdsa"
-	"encoding/binary"
 	"math/big"
 	"math/rand"
 	"testing"
@@ -11,9 +9,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/ethereum-optimism/optimism/op-service/testutils"
 )
@@ -346,7 +342,6 @@ func TestSpanBatchTxsRecoverV(t *testing.T) {
 		{"access list tx", testutils.RandomAccessListTx, isthmusSigner},
 		{"dynamic fee tx", testutils.RandomDynamicFeeTx, isthmusSigner},
 		{"setcode tx", testutils.RandomSetCodeTx, isthmusSigner},
-		{"eip8130 tx", testutils.RandomEip8130Tx, isthmusSigner},
 	}
 
 	for _, testCase := range cases {
@@ -438,7 +433,6 @@ func TestSpanBatchTxsRoundTripFullTxs(t *testing.T) {
 		{"access list tx", testutils.RandomAccessListTx, isthmusSigner},
 		{"dynamic fee tx", testutils.RandomDynamicFeeTx, isthmusSigner},
 		{"setcode tx", testutils.RandomSetCodeTx, isthmusSigner},
-		{"eip8130 tx", testutils.RandomEip8130Tx, isthmusSigner},
 	}
 
 	for _, testCase := range cases {
@@ -542,292 +536,15 @@ func TestSpanBatchTxsMaxProtectedBitsLength(t *testing.T) {
 	require.ErrorIs(t, err, ErrTooBigSpanBatchSize)
 }
 
-// TestDecodeEip8130ProofTruncatedLengthPrefix locks the truncated-uvarint branch of
-// decodeEip8130Proof: an empty reader yields no length prefix at all.
-func TestDecodeEip8130ProofTruncatedLengthPrefix(t *testing.T) {
-	_, err := decodeEip8130Proof(bytes.NewReader([]byte{}))
-	require.ErrorContains(t, err, "failed to read eip8130 auth data length")
-}
-
-// TestDecodeEip8130ProofOversizedLength locks the fail-fast byte-cap branch: a length
-// prefix above maxEip8130AuthProofBytes is rejected before any allocation is attempted.
-func TestDecodeEip8130ProofOversizedLength(t *testing.T) {
-	var buf [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(buf[:], uint64(maxEip8130AuthProofBytes)+1)
-	_, err := decodeEip8130Proof(bytes.NewReader(buf[:n]))
-	require.ErrorIs(t, err, ErrTooBigSpanBatchSize)
-}
-
-// TestDecodeEip8130ProofTruncatedBody locks the io.ReadFull branch: the declared length
-// is valid but the reader carries fewer bytes than the prefix promises.
-func TestDecodeEip8130ProofTruncatedBody(t *testing.T) {
-	var buf [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(buf[:], 8)
-	body := append(buf[:n], 0x01, 0x02) // declares 8 bytes, supplies 2
-	_, err := decodeEip8130Proof(bytes.NewReader(body))
-	require.ErrorContains(t, err, "failed to read eip8130 auth data")
-}
-
-// TestFullTxsNotEnoughEip8130AuthData locks the fullTxs guard that the per-tx
-// eip8130_auth_data column must hold an entry for every 0x79 tx in txDatas. It takes a
-// valid round-trippable span batch and drops the auth-data column.
-func TestFullTxsNotEnoughEip8130AuthData(t *testing.T) {
+// TestSpanBatchTxsRejectsEip8130 locks that EIP-8130 transactions cannot be
+// carried in span batches: Everest enables EIP-8130 after Denim disables span
+// batches, so they must use singular batches.
+func TestSpanBatchTxsRejectsEip8130(t *testing.T) {
 	chainID := big.NewInt(8453)
-	signer := types.NewIsthmusSigner(chainID)
-	tx := testutils.RandomEip8130Tx(rand.New(rand.NewSource(1)), signer)
+	tx := testutils.RandomEip8130Tx(rand.New(rand.NewSource(1)), types.NewIsthmusSigner(chainID))
 	raw, err := tx.MarshalBinary()
 	require.NoError(t, err)
 
-	sbt, err := newSpanBatchTxs([][]byte{raw}, chainID)
-	require.NoError(t, err)
-	require.NoError(t, sbt.recoverV(chainID))
-
-	sbt.eip8130AuthData = nil
-	_, err = sbt.fullTxs(chainID)
-	require.ErrorContains(t, err, "not enough eip8130 auth data")
-}
-
-// roundTripSpanBatchEip8130 runs txs through the full span-batch tx codec: column
-// encode, decode, recoverV and reconstruction, asserting each reconstructed tx is
-// byte-identical to its original 2718 encoding.
-func roundTripSpanBatchEip8130(t *testing.T, chainID *big.Int, txs []*types.Transaction) {
-	t.Helper()
-	var raw [][]byte
-	for _, tx := range txs {
-		b, err := tx.MarshalBinary()
-		require.NoError(t, err)
-		raw = append(raw, b)
-	}
-
-	sbt, err := newSpanBatchTxs(raw, chainID)
-	require.NoError(t, err)
-
-	var buf bytes.Buffer
-	require.NoError(t, sbt.encode(&buf))
-
-	var sbt2 spanBatchTxs
-	sbt2.totalBlockTxCount = sbt.totalBlockTxCount
-	require.NoError(t, sbt2.decode(bytes.NewReader(buf.Bytes())))
-	require.NoError(t, sbt2.recoverV(chainID))
-
-	out, err := sbt2.fullTxs(chainID)
-	require.NoError(t, err)
-	require.Equal(t, raw, out)
-}
-
-// fixedKey returns a deterministic secp256k1 key derived from a single fixed byte, so
-// legacy / 1559 / 7702 signatures are deterministic and reproducible for debugging
-// (signing is RFC-6979 deterministic).
-func fixedKey(t *testing.T, b byte) *ecdsa.PrivateKey {
-	t.Helper()
-	key, err := crypto.ToECDSA(bytes.Repeat([]byte{b}, 32))
-	require.NoError(t, err)
-	return key
-}
-
-func mustSignTx(t *testing.T, signer types.Signer, key *ecdsa.PrivateKey, txData types.TxData) *types.Transaction {
-	t.Helper()
-	tx, err := types.SignNewTx(key, signer, txData)
-	require.NoError(t, err)
-	return tx
-}
-
-// TestSpanBatchEip8130RoundTrip drives every EIP-8130 (0x79) shape through the full
-// span-batch tx codec (encode -> decode -> recoverV -> fullTxs) and asserts each tx is
-// reconstructed byte-for-byte, both in isolation and interleaved with legacy/1559/7702
-// txs to exercise column alignment.
-func TestSpanBatchEip8130RoundTrip(t *testing.T) {
-	chainID := big.NewInt(8453)
-	signer := types.NewIsthmusSigner(chainID)
-	mk := func(inner *types.Eip8130Tx) *types.Transaction {
-		inner.ChainID = chainID
-		return types.NewTx(inner)
-	}
-
-	eoaAuth := bytes.Repeat([]byte{0xa1}, 65) // EOA path: r||s||v blob
-	auth20A := bytes.Repeat([]byte{0xb2}, 20) // 20-byte authenticator A
-	auth20B := bytes.Repeat([]byte{0xc3}, 20) // 20-byte authenticator B
-	proofA := []byte{0x01, 0x02, 0x03, 0x04}  // proof tail A
-	proofB := []byte{0x05, 0x06, 0x07}        // proof tail B
-	addrA := common.HexToAddress("0x000000000000000000000000000000000000aaaa")
-	addrB := common.HexToAddress("0x000000000000000000000000000000000000bbbb")
-	lockPayload := make([]byte, 32) // abi.encode(uint16(1))
-	lockPayload[31] = 0x01
-
-	variants := []struct {
-		name string
-		tx   *types.Transaction
-	}{
-		{"eoa_self_pay", mk(&types.Eip8130Tx{
-			NonceKey:      big.NewInt(0),
-			NonceSequence: 7,
-			ValidAfter:    100,
-			ValidBefore:   200,
-			GasTipCap:     big.NewInt(1),
-			GasFeeCap:     big.NewInt(2),
-			GasLimit:      21000,
-			SenderAuth:    eoaAuth,
-		})},
-		{"configured_self_pay", mk(&types.Eip8130Tx{
-			Sender:        &addrA,
-			NonceKey:      big.NewInt(3),
-			NonceSequence: 8,
-			ValidAfter:    200,
-			ValidBefore:   300,
-			GasTipCap:     big.NewInt(5),
-			GasFeeCap:     big.NewInt(9),
-			GasLimit:      50000,
-			SenderAuth:    append(append([]byte(nil), auth20A...), proofA...),
-		})},
-		{"configured_no_proof", mk(&types.Eip8130Tx{
-			Sender:        &addrA,
-			NonceKey:      big.NewInt(3),
-			NonceSequence: 8,
-			GasTipCap:     big.NewInt(5),
-			GasFeeCap:     big.NewInt(9),
-			GasLimit:      50000,
-			SenderAuth:    append([]byte(nil), auth20A...),
-		})},
-		{"configured_payer", mk(&types.Eip8130Tx{
-			Sender:        &addrA,
-			NonceKey:      big.NewInt(4),
-			NonceSequence: 9,
-			ValidAfter:    300,
-			ValidBefore:   400,
-			GasTipCap:     big.NewInt(6),
-			GasFeeCap:     big.NewInt(10),
-			GasLimit:      60000,
-			Payer:         &addrB,
-			SenderAuth:    append(append([]byte(nil), auth20A...), proofA...),
-			PayerAuth:     append(append([]byte(nil), auth20B...), proofB...),
-		})},
-		{"account_changes", mk(&types.Eip8130Tx{
-			NonceKey:      big.NewInt(11),
-			NonceSequence: 12,
-			ValidAfter:    400,
-			ValidBefore:   500,
-			GasTipCap:     big.NewInt(7),
-			GasFeeCap:     big.NewInt(13),
-			GasLimit:      70000,
-			AccountChanges: []types.AccountChange{
-				{Create: &types.CreateEntry{
-					UserSalt: common.Hash{0x22},
-					Code:     []byte{0x60, 0x80, 0x60, 0x40},
-					InitialActors: []types.InitialActor{
-						{ActorID: common.Hash{0x33}, Authenticator: common.Address{0xbb}},
-						{ActorID: common.Hash{0x34}, Authenticator: common.Address{0xbc}, Scope: 0x1234},
-					},
-				}},
-				{ConfigChange: &types.SignedAccountChanges{
-					Channel:  types.AccountChangeChannelMultichain,
-					Sequence: 5,
-					Changes: []types.SignedChange{
-						{ChangeType: types.ChangeTypeAuthorizeActor, Payload: []byte{0xaa, 0xbb}},
-						{ChangeType: types.ChangeTypeRevokeActor, Payload: common.Hash{0x42}.Bytes()},
-						{ChangeType: types.ChangeTypeIncrementLocalEpoch},
-					},
-					Signature: []byte{0xde, 0xad, 0xbe, 0xef},
-				}},
-				{Delegation: &types.Delegation{Target: common.Address{0xdd}}},
-			},
-			Calls: [][]types.Call{
-				{
-					{To: common.Address{0xaa}, Data: []byte{}},
-					{To: common.Address{0xab}, Value: big.NewInt(1_000_000_000_000_000_000), Data: []byte{0xde, 0xad, 0xbe, 0xef}},
-				},
-				{
-					{To: common.Address{0xac}, Value: new(big.Int).Lsh(big.NewInt(1), 255), Data: []byte{0x01}},
-				},
-			},
-			Metadata:   []byte{0x09, 0x08, 0x07},
-			SenderAuth: eoaAuth,
-		})},
-		{"lock_config_change", mk(&types.Eip8130Tx{
-			NonceKey:      big.NewInt(12),
-			NonceSequence: 13,
-			ValidAfter:    500,
-			ValidBefore:   600,
-			GasTipCap:     big.NewInt(8),
-			GasFeeCap:     big.NewInt(14),
-			GasLimit:      50000,
-			AccountChanges: []types.AccountChange{{ConfigChange: &types.SignedAccountChanges{
-				Channel:   types.AccountChangeChannelLocal,
-				Sequence:  6,
-				Changes:   []types.SignedChange{{ChangeType: types.ChangeTypeLock, Payload: lockPayload}},
-				Signature: []byte{0xca, 0xfe},
-			}}},
-			SenderAuth: eoaAuth,
-		})},
-		{"unlock_config_change", mk(&types.Eip8130Tx{
-			NonceKey:      big.NewInt(14),
-			NonceSequence: 15,
-			ValidAfter:    600,
-			ValidBefore:   700,
-			GasTipCap:     big.NewInt(9),
-			GasFeeCap:     big.NewInt(15),
-			GasLimit:      50000,
-			AccountChanges: []types.AccountChange{{ConfigChange: &types.SignedAccountChanges{
-				Channel:   types.AccountChangeChannelLocal,
-				Sequence:  7,
-				Changes:   []types.SignedChange{{ChangeType: types.ChangeTypeUnlock}},
-				Signature: []byte{0xba, 0xbe},
-			}}},
-			SenderAuth: eoaAuth,
-		})},
-		{"minimal", mk(&types.Eip8130Tx{
-			NonceKey:      big.NewInt(0),
-			NonceSequence: 0,
-			GasTipCap:     big.NewInt(0),
-			GasFeeCap:     big.NewInt(0),
-			GasLimit:      21000,
-		})},
-	}
-
-	for _, v := range variants {
-		t.Run(v.name, func(t *testing.T) {
-			roundTripSpanBatchEip8130(t, chainID, []*types.Transaction{v.tx})
-		})
-	}
-
-	legacyTx := mustSignTx(t, signer, fixedKey(t, 0x11), &types.LegacyTx{
-		Nonce:    3,
-		GasPrice: big.NewInt(1_000_000_000),
-		Gas:      21000,
-		To:       ptr(common.HexToAddress("0x00000000000000000000000000000000000000ff")),
-		Value:    big.NewInt(12345),
-		Data:     []byte{0xca, 0xfe},
-	})
-	dynTx := mustSignTx(t, signer, fixedKey(t, 0x12), &types.DynamicFeeTx{
-		ChainID:   chainID,
-		Nonce:     4,
-		GasTipCap: big.NewInt(2_000_000_000),
-		GasFeeCap: big.NewInt(20_000_000_000),
-		Gas:       30000,
-		To:        ptr(common.HexToAddress("0x00000000000000000000000000000000000000ee")),
-		Value:     big.NewInt(67890),
-		Data:      []byte{0xbe, 0xef},
-	})
-	setCodeAuth, err := types.SignSetCode(fixedKey(t, 0x13), types.SetCodeAuthorization{
-		ChainID: *uint256.NewInt(8453),
-		Address: common.HexToAddress("0x00000000000000000000000000000000000000dd"),
-		Nonce:   1,
-	})
-	require.NoError(t, err)
-	setCodeTx := mustSignTx(t, signer, fixedKey(t, 0x14), &types.SetCodeTx{
-		ChainID:   uint256.NewInt(8453),
-		Nonce:     5,
-		GasTipCap: uint256.NewInt(3_000_000_000),
-		GasFeeCap: uint256.NewInt(30_000_000_000),
-		Gas:       40000,
-		To:        common.HexToAddress("0x00000000000000000000000000000000000000cc"),
-		Value:     uint256.NewInt(111),
-		Data:      []byte{0xab, 0xcd},
-		AuthList:  []types.SetCodeAuthorization{setCodeAuth},
-	})
-
-	t.Run("mixed_batch", func(t *testing.T) {
-		roundTripSpanBatchEip8130(t, chainID, []*types.Transaction{
-			legacyTx, variants[0].tx, dynTx, variants[3].tx, setCodeTx,
-		})
-	})
+	_, err = newSpanBatchTxs([][]byte{raw}, chainID)
+	require.ErrorContains(t, err, "invalid tx type")
 }

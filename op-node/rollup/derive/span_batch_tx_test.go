@@ -1,15 +1,12 @@
 package derive
 
 import (
-	"bytes"
 	"math/big"
 	"math/rand"
 	"testing"
 
 	"github.com/ethereum-optimism/optimism/op-service/testutils"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -154,112 +151,4 @@ func TestSpanBatchTxSetCodeInvalidTo(t *testing.T) {
 	sbtx.inner = &spanBatchSetCodeTxData{}
 	_, err := sbtx.convertToFullTx(0, 0, nil, nil, nil, nil, nil)
 	require.ErrorContains(t, err, "to address is required for SetCodeTx")
-}
-
-func TestSpanBatchTxEip8130ValidityWindowWire(t *testing.T) {
-	inner := spanBatchEip8130TxData{
-		NonceKey:    big.NewInt(0),
-		ValidAfter:  42,
-		ValidBefore: 99,
-		GasTipCap:   big.NewInt(1),
-		GasFeeCap:   big.NewInt(2),
-	}
-	var buf bytes.Buffer
-	buf.WriteByte(types.Eip8130TxType)
-	require.NoError(t, rlp.Encode(&buf, &inner))
-	require.Equal(t, []byte{
-		types.Eip8130TxType,
-		0xcc, // list, 12 payload bytes
-		0x80, // sender = nil
-		0x80, // nonceKey = 0
-		0x2a, // validAfter = 42
-		0x63, // validBefore = 99
-		0x01, // gasTipCap = 1
-		0x02, // gasFeeCap = 2
-		0x80, // payer = nil
-		0xc0, // accountChanges = empty list
-		0xc0, // calls = empty list
-		0x80, // metadata = empty
-		0x80, // senderAuthenticator = empty
-		0x80, // payerAuthenticator = empty
-	}, buf.Bytes())
-
-	var sbtx spanBatchTx
-	decoded, err := sbtx.decodeTyped(buf.Bytes())
-	require.NoError(t, err)
-	got := decoded.(*spanBatchEip8130TxData)
-	require.Equal(t, uint64(42), got.ValidAfter)
-	require.Equal(t, uint64(99), got.ValidBefore)
-
-	legacy := []byte{
-		types.Eip8130TxType,
-		0xcb, // list, 11 payload bytes
-		0x80, // sender = nil
-		0x80, // nonceKey = 0
-		0x2a, // legacy expiry = 42
-		0x01, // gasTipCap = 1
-		0x02, // gasFeeCap = 2
-		0x80, // payer = nil
-		0xc0, // accountChanges = empty list
-		0xc0, // calls = empty list
-		0x80, // metadata = empty
-		0x80, // senderAuthenticator = empty
-		0x80, // payerAuthenticator = empty
-	}
-	_, err = sbtx.decodeTyped(legacy)
-	require.Error(t, err)
-}
-
-// TestSpanBatchTxEip8130AuthBinding locks the decode-side invariant that ties an actor's
-// presence to the length of its authenticator column: a configured actor must carry a
-// 20-byte authenticator and an EOA / self-pay actor must carry none. Each case breaks
-// exactly one binding, so decodeTyped must reject it.
-func TestSpanBatchTxEip8130AuthBinding(t *testing.T) {
-	addr := common.HexToAddress("0x00000000000000000000000000000000000000aa")
-	auth20 := bytes.Repeat([]byte{0x01}, common.AddressLength)
-
-	// Configured sender, self-pay, with a valid 20-byte sender authenticator.
-	base := spanBatchEip8130TxData{
-		NonceKey:            big.NewInt(0),
-		GasTipCap:           big.NewInt(0),
-		GasFeeCap:           big.NewInt(0),
-		Sender:              &addr,
-		SenderAuthenticator: auth20,
-	}
-	encode := func(inner spanBatchEip8130TxData) []byte {
-		var buf bytes.Buffer
-		buf.WriteByte(types.Eip8130TxType)
-		require.NoError(t, rlp.Encode(&buf, &inner))
-		return buf.Bytes()
-	}
-
-	var sbtx spanBatchTx
-
-	// Sanity: the untampered, consistent tx decodes cleanly.
-	_, err := sbtx.decodeTyped(encode(base))
-	require.NoError(t, err)
-
-	// Configured sender must carry a 20-byte authenticator, not empty.
-	senderEmpty := base
-	senderEmpty.SenderAuthenticator = nil
-	_, err = sbtx.decodeTyped(encode(senderEmpty))
-	require.ErrorContains(t, err, "eip8130 sender authenticator")
-
-	// Configured sender must carry exactly 20 bytes, not more.
-	senderLong := base
-	senderLong.SenderAuthenticator = bytes.Repeat([]byte{0x01}, common.AddressLength+1)
-	_, err = sbtx.decodeTyped(encode(senderLong))
-	require.ErrorContains(t, err, "eip8130 sender authenticator")
-
-	// EOA sender (nil) must carry an empty authenticator.
-	senderEOA := base
-	senderEOA.Sender = nil
-	_, err = sbtx.decodeTyped(encode(senderEOA))
-	require.ErrorContains(t, err, "eip8130 sender authenticator")
-
-	// Absent payer must carry an empty authenticator.
-	payerSet := base
-	payerSet.PayerAuthenticator = auth20
-	_, err = sbtx.decodeTyped(encode(payerSet))
-	require.ErrorContains(t, err, "eip8130 payer authenticator")
 }

@@ -185,6 +185,9 @@ func (c *CLIConfig) Check() error {
 	if c.BatchType > derive.SpanBatchType {
 		return fmt.Errorf("unknown batch type: %v", c.BatchType)
 	}
+	if c.BatchType == derive.SpanBatchType {
+		return errors.New("span batches are not supported: Denim disables them and EIP-8130 transactions require singular batches, use --batch-type=0")
+	}
 	if c.CheckRecentTxsDepth > 128 {
 		return fmt.Errorf("CheckRecentTxsDepth cannot be set higher than 128: %v", c.CheckRecentTxsDepth)
 	}
