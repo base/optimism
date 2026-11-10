@@ -71,6 +71,12 @@ type RaftConsensusConfig struct {
 	HeartbeatTimeout   time.Duration
 	LeaderLeaseTimeout time.Duration
 
+	// LogStoreNoSync skips fsync on raft log store writes. Entries still reach
+	// the OS page cache, so a process crash loses nothing; a kernel crash or
+	// power loss can drop recent entries or corrupt the log store on this node.
+	// The stable store (current term and vote) is always synced.
+	LogStoreNoSync bool
+
 	// Metrics collects sub-operation timing data for the commit path.
 	// If nil, no metrics are recorded.
 	Metrics ConsensusMetrics
@@ -121,7 +127,7 @@ func NewRaftConsensus(log log.Logger, cfg *RaftConsensusConfig) (*RaftConsensus,
 		}
 	}
 
-	stores, err := openRaftStores(log, baseDir, cfg.StorageBackend, cfg.Metrics)
+	stores, err := openRaftStores(log, baseDir, cfg.StorageBackend, cfg.LogStoreNoSync, cfg.Metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -221,22 +227,31 @@ type raftStoreSet struct {
 	closer      io.Closer
 }
 
-func openRaftStores(log log.Logger, baseDir string, backend string, metrics ConsensusMetrics) (*raftStoreSet, error) {
+func openRaftStores(log log.Logger, baseDir string, backend string, logStoreNoSync bool, metrics ConsensusMetrics) (*raftStoreSet, error) {
 	switch normalizeRaftStorageBackend(backend) {
 	case RaftStorageBackendBoltDB:
-		return openBoltDBRaftStores(baseDir, metrics)
+		return openBoltDBRaftStores(log, baseDir, logStoreNoSync, metrics)
 	case RaftStorageBackendWAL:
+		if logStoreNoSync {
+			return nil, fmt.Errorf("log store no-sync is not supported with the %q raft storage backend", RaftStorageBackendWAL)
+		}
 		return openWALRaftStores(log, baseDir, metrics)
 	default:
 		return nil, fmt.Errorf("unsupported raft storage backend %q", backend)
 	}
 }
 
-func openBoltDBRaftStores(baseDir string, metrics ConsensusMetrics) (*raftStoreSet, error) {
+func openBoltDBRaftStores(log log.Logger, baseDir string, noSync bool, metrics ConsensusMetrics) (*raftStoreSet, error) {
 	logStorePath := filepath.Join(baseDir, "raft-log.db")
-	boltLogStore, err := boltdb.NewBoltStore(logStorePath)
+	boltLogStore, err := boltdb.New(boltdb.Options{
+		Path:   logStorePath,
+		NoSync: noSync,
+	})
 	if err != nil {
-		return nil, fmt.Errorf(`boltdb.NewBoltStore(%q): %w`, logStorePath, err)
+		return nil, fmt.Errorf(`boltdb.New(%q): %w`, logStorePath, err)
+	}
+	if noSync {
+		log.Warn("Raft log store fsync disabled", "path", logStorePath)
 	}
 
 	stableStorePath := filepath.Join(baseDir, "raft-stable.db")

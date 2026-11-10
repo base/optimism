@@ -42,3 +42,20 @@ func TestConfigCheckInvalidRaftStorageBackend(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `invalid raft storage backend "bad-backend"`)
 }
+
+func TestConfigCheckLogStoreNoSyncRequiresBoltDB(t *testing.T) {
+	cfg := &Config{
+		ConsensusAddr:      "127.0.0.1",
+		ConsensusPort:      9000,
+		RaftServerID:       "server-1",
+		RaftStorageDir:     "/tmp/op-conductor",
+		RaftStorageBackend: consensus.RaftStorageBackendWAL,
+		RaftLogStoreNoSync: true,
+		NodeRPC:            "http://node.example",
+		ExecutionRPC:       "http://exec.example",
+	}
+
+	err := cfg.Check()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "raft log store no-sync is only supported")
+}

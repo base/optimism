@@ -59,6 +59,9 @@ type Config struct {
 	// If the leader reaches this timeout without contacts to followers, it resigns.
 	RaftLeaderLeaseTimeout time.Duration
 
+	// RaftLogStoreNoSync skips fsync on raft log store writes.
+	RaftLogStoreNoSync bool
+
 	// NodeRPC is the HTTP provider URL for op-node.
 	NodeRPC string
 
@@ -124,6 +127,9 @@ func (c *Config) Check() error {
 	if !consensus.IsValidRaftStorageBackend(c.RaftStorageBackend) {
 		return fmt.Errorf("invalid raft storage backend %q", c.RaftStorageBackend)
 	}
+	if c.RaftLogStoreNoSync && c.RaftStorageBackend == consensus.RaftStorageBackendWAL {
+		return fmt.Errorf("raft log store no-sync is only supported with the %q storage backend", consensus.RaftStorageBackendBoltDB)
+	}
 	if c.NodeRPC == "" {
 		return fmt.Errorf("missing node RPC")
 	}
@@ -180,6 +186,7 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*Config, error) {
 		RaftTrailingLogs:              ctx.Uint64(flags.RaftTrailingLogs.Name),
 		RaftHeartbeatTimeout:          ctx.Duration(flags.RaftHeartbeatTimeout.Name),
 		RaftLeaderLeaseTimeout:        ctx.Duration(flags.RaftLeaderLeaseTimeout.Name),
+		RaftLogStoreNoSync:            ctx.Bool(flags.RaftLogStoreNoSync.Name),
 		NodeRPC:                       ctx.String(flags.NodeRPC.Name),
 		ExecutionRPC:                  ctx.String(flags.ExecutionRPC.Name),
 		SupervisorRPC:                 ctx.String(flags.SupervisorRPC.Name),

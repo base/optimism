@@ -87,6 +87,14 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RAFT_LEASE_TIMEOUT"),
 		Value:   500 * time.Millisecond,
 	}
+	RaftLogStoreNoSync = &cli.BoolFlag{
+		Name: "raft.log-store-no-sync",
+		Usage: "Skip fsync on raft log store writes. Lowers commit latency. A process crash loses nothing, " +
+			"but a kernel crash or power loss can drop recent entries or corrupt the log store on that node. " +
+			"The stable store (term and vote) is always synced. Only supported with the boltdb storage backend.",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RAFT_LOG_STORE_NO_SYNC"),
+		Value:   false,
+	}
 	NodeRPC = &cli.StringFlag{
 		Name:    "node.rpc",
 		Usage:   "HTTP provider URL for op-node",
@@ -234,6 +242,7 @@ var optionalFlags = []cli.Flag{
 	RaftTrailingLogs,
 	RaftHeartbeatTimeout,
 	RaftLeaderLeaseTimeout,
+	RaftLogStoreNoSync,
 	SupervisorRPC,
 	RollupBoostEnabled,
 	RollupBoostHealthcheckTimeout,
