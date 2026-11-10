@@ -184,6 +184,7 @@ func (c *OpConductor) initConsensus(ctx context.Context) error {
 		ListenAddr:         c.cfg.ConsensusAddr,
 		ListenPort:         c.cfg.ConsensusPort,
 		StorageDir:         c.cfg.RaftStorageDir,
+		StorageBackend:     c.cfg.RaftStorageBackend,
 		Bootstrap:          c.cfg.RaftBootstrap,
 		SnapshotInterval:   c.cfg.RaftSnapshotInterval,
 		SnapshotThreshold:  c.cfg.RaftSnapshotThreshold,

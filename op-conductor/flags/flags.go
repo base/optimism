@@ -51,6 +51,12 @@ var (
 		Usage:   "Directory to store raft data",
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RAFT_STORAGE_DIR"),
 	}
+	RaftStorageBackend = &cli.StringFlag{
+		Name:    "raft.storage.backend",
+		Usage:   "Raft storage backend to use for log and stable stores: boltdb or wal",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RAFT_STORAGE_BACKEND"),
+		Value:   "boltdb",
+	}
 	RaftSnapshotInterval = &cli.DurationFlag{
 		Name:    "raft.snapshot-interval",
 		Usage:   "The interval to check if a snapshot should be taken.",
@@ -220,6 +226,7 @@ var optionalFlags = []cli.Flag{
 	Paused,
 	RPCEnableProxy,
 	RaftBootstrap,
+	RaftStorageBackend,
 	HealthCheckSafeEnabled,
 	HealthCheckSafeInterval,
 	RaftSnapshotInterval,

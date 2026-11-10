@@ -3,6 +3,7 @@ package consensus
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -11,12 +12,18 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/hashicorp/raft"
 	boltdb "github.com/hashicorp/raft-boltdb/v2"
+	wal "github.com/hashicorp/raft-wal"
 	"github.com/pkg/errors"
 
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 )
 
 const defaultTimeout = 5 * time.Second
+
+const (
+	RaftStorageBackendBoltDB = "boltdb"
+	RaftStorageBackendWAL    = "wal"
+)
 
 var _ Consensus = (*RaftConsensus)(nil)
 
@@ -28,6 +35,8 @@ type RaftConsensus struct {
 
 	serverID raft.ServerID
 	r        *raft.Raft
+
+	storeCloser io.Closer
 
 	transport *raft.NetworkTransport
 	// advertisedAddr is the host & port to contact this server.
@@ -54,6 +63,7 @@ type RaftConsensusConfig struct {
 	ListenAddr string
 
 	StorageDir         string
+	StorageBackend     string
 	Bootstrap          bool
 	SnapshotInterval   time.Duration
 	SnapshotThreshold  uint64
@@ -64,6 +74,24 @@ type RaftConsensusConfig struct {
 	// Metrics collects sub-operation timing data for the commit path.
 	// If nil, no metrics are recorded.
 	Metrics ConsensusMetrics
+}
+
+// IsValidRaftStorageBackend returns true if backend is supported.
+// The empty value is accepted for backwards-compatible programmatic configs.
+func IsValidRaftStorageBackend(backend string) bool {
+	switch normalizeRaftStorageBackend(backend) {
+	case RaftStorageBackendBoltDB, RaftStorageBackendWAL:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeRaftStorageBackend(backend string) string {
+	if backend == "" {
+		return RaftStorageBackendBoltDB
+	}
+	return backend
 }
 
 // checkTCPPortOpen attempts to connect to the specified address and returns an error if the connection fails.
@@ -93,19 +121,16 @@ func NewRaftConsensus(log log.Logger, cfg *RaftConsensusConfig) (*RaftConsensus,
 		}
 	}
 
-	var err error
-	logStorePath := filepath.Join(baseDir, "raft-log.db")
-	boltLogStore, err := boltdb.NewBoltStore(logStorePath)
+	stores, err := openRaftStores(log, baseDir, cfg.StorageBackend, cfg.Metrics)
 	if err != nil {
-		return nil, fmt.Errorf(`boltdb.NewBoltStore(%q): %w`, logStorePath, err)
+		return nil, err
 	}
-	logStore := wrapInstrumentedLogStore(boltLogStore, cfg.Metrics)
-
-	stableStorePath := filepath.Join(baseDir, "raft-stable.db")
-	stableStore, err := boltdb.NewBoltStore(stableStorePath)
-	if err != nil {
-		return nil, fmt.Errorf(`boltdb.NewBoltStore(%q): %w`, stableStorePath, err)
-	}
+	storesOwned := false
+	defer func() {
+		if !storesOwned && stores.closer != nil {
+			_ = stores.closer.Close()
+		}
+	}()
 
 	snapshotStore, err := raft.NewFileSnapshotStoreWithLogger(baseDir, 1, rc.Logger)
 	if err != nil {
@@ -140,7 +165,7 @@ func NewRaftConsensus(log log.Logger, cfg *RaftConsensusConfig) (*RaftConsensus,
 
 	fsm := NewUnsafeHeadTracker(log, cfg.Metrics)
 
-	r, err := raft.NewRaft(rc, fsm, logStore, stableStore, snapshotStore, transport)
+	r, err := raft.NewRaft(rc, fsm, stores.logStore, stores.stableStore, snapshotStore, transport)
 	if err != nil {
 		log.Error("failed to create raft", "err", err)
 		return nil, errors.Wrap(err, "failed to create raft")
@@ -178,14 +203,88 @@ func NewRaftConsensus(log log.Logger, cfg *RaftConsensusConfig) (*RaftConsensus,
 		}
 	}
 
+	storesOwned = true
 	return &RaftConsensus{
 		log:           log,
 		metrics:       cfg.Metrics,
 		r:             r,
 		serverID:      raft.ServerID(cfg.ServerID),
+		storeCloser:   stores.closer,
 		unsafeTracker: fsm,
 		transport:     transport,
 	}, err
+}
+
+type raftStoreSet struct {
+	logStore    raft.LogStore
+	stableStore raft.StableStore
+	closer      io.Closer
+}
+
+func openRaftStores(log log.Logger, baseDir string, backend string, metrics ConsensusMetrics) (*raftStoreSet, error) {
+	switch normalizeRaftStorageBackend(backend) {
+	case RaftStorageBackendBoltDB:
+		return openBoltDBRaftStores(baseDir, metrics)
+	case RaftStorageBackendWAL:
+		return openWALRaftStores(log, baseDir, metrics)
+	default:
+		return nil, fmt.Errorf("unsupported raft storage backend %q", backend)
+	}
+}
+
+func openBoltDBRaftStores(baseDir string, metrics ConsensusMetrics) (*raftStoreSet, error) {
+	logStorePath := filepath.Join(baseDir, "raft-log.db")
+	boltLogStore, err := boltdb.NewBoltStore(logStorePath)
+	if err != nil {
+		return nil, fmt.Errorf(`boltdb.NewBoltStore(%q): %w`, logStorePath, err)
+	}
+
+	stableStorePath := filepath.Join(baseDir, "raft-stable.db")
+	stableStore, err := boltdb.NewBoltStore(stableStorePath)
+	if err != nil {
+		_ = boltLogStore.Close()
+		return nil, fmt.Errorf(`boltdb.NewBoltStore(%q): %w`, stableStorePath, err)
+	}
+
+	return &raftStoreSet{
+		logStore:    wrapInstrumentedLogStore(boltLogStore, metrics),
+		stableStore: stableStore,
+		closer:      closeFunc(func() error { return closeRaftStores(boltLogStore, stableStore) }),
+	}, nil
+}
+
+func openWALRaftStores(log log.Logger, baseDir string, metrics ConsensusMetrics) (*raftStoreSet, error) {
+	walDir := filepath.Join(baseDir, "raft-wal")
+	if err := os.MkdirAll(walDir, 0o755); err != nil {
+		return nil, fmt.Errorf("error creating raft wal dir: %w", err)
+	}
+
+	walStore, err := wal.Open(walDir)
+	if err != nil {
+		return nil, fmt.Errorf(`wal.Open(%q): %w`, walDir, err)
+	}
+	log.Info("Using raft WAL storage backend", "dir", walDir)
+
+	return &raftStoreSet{
+		logStore:    wrapInstrumentedLogStore(walStore, metrics),
+		stableStore: walStore,
+		closer:      walStore,
+	}, nil
+}
+
+type closeFunc func() error
+
+func (f closeFunc) Close() error {
+	return f()
+}
+
+func closeRaftStores(closers ...io.Closer) error {
+	for _, closer := range closers {
+		if err := closer.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func wrapInstrumentedLogStore(store raft.LogStore, metrics ConsensusMetrics) raft.LogStore {
@@ -219,6 +318,11 @@ func (s *instrumentedLogStore) StoreLogs(logEntries []*raft.Log) error {
 		s.metrics.RecordLogStoreDuration(time.Since(start).Seconds())
 	}
 	return err
+}
+
+func (s *instrumentedLogStore) IsMonotonic() bool {
+	store, ok := s.LogStore.(raft.MonotonicLogStore)
+	return ok && store.IsMonotonic()
 }
 
 // Addr returns the address to contact this raft consensus server.
@@ -328,6 +432,12 @@ func (rc *RaftConsensus) Shutdown() error {
 	if err := rc.r.Shutdown().Error(); err != nil {
 		rc.log.Error("failed to shutdown raft", "err", err)
 		return err
+	}
+	if rc.storeCloser != nil {
+		if err := rc.storeCloser.Close(); err != nil {
+			rc.log.Error("failed to close raft stores", "err", err)
+			return err
+		}
 	}
 	return nil
 }
