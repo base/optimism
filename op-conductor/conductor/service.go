@@ -191,6 +191,7 @@ func (c *OpConductor) initConsensus(ctx context.Context) error {
 		TrailingLogs:       c.cfg.RaftTrailingLogs,
 		HeartbeatTimeout:   c.cfg.RaftHeartbeatTimeout,
 		LeaderLeaseTimeout: c.cfg.RaftLeaderLeaseTimeout,
+		LogStoreNoSync:     c.cfg.RaftLogStoreNoSync,
 		Metrics:            c.metrics,
 	}
 	cons, err := consensus.NewRaftConsensus(c.log, raftConsensusConfig)

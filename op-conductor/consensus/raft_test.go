@@ -84,3 +84,44 @@ func TestCommitAndRead(t *testing.T) {
 		})
 	}
 }
+
+func TestCommitAndReadLogStoreNoSync(t *testing.T) {
+	log := testlog.Logger(t, log.LevelInfo)
+	cons, err := NewRaftConsensus(log, &RaftConsensusConfig{
+		ServerID:           "SequencerA",
+		ListenPort:         0,
+		ListenAddr:         "127.0.0.1",
+		StorageDir:         t.TempDir(),
+		Bootstrap:          true,
+		SnapshotInterval:   120 * time.Second,
+		SnapshotThreshold:  10240,
+		TrailingLogs:       8192,
+		HeartbeatTimeout:   1000 * time.Millisecond,
+		LeaderLeaseTimeout: 500 * time.Millisecond,
+		LogStoreNoSync:     true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cons.Shutdown() })
+
+	<-cons.LeaderCh()
+
+	one := hexutil.Uint64(1)
+	hash := common.HexToHash("0x12345")
+	payload := &eth.ExecutionPayloadEnvelope{
+		ParentBeaconBlockRoot: &hash,
+		ExecutionPayload: &eth.ExecutionPayload{
+			BlockNumber:   1,
+			Timestamp:     hexutil.Uint64(time.Now().Unix()),
+			Transactions:  []eth.Data{},
+			ExtraData:     []byte{},
+			Withdrawals:   &types.Withdrawals{},
+			ExcessBlobGas: &one,
+			BlobGasUsed:   &one,
+		},
+	}
+	require.NoError(t, cons.CommitUnsafePayload(payload))
+
+	unsafeHead, err := cons.LatestUnsafePayload()
+	require.NoError(t, err)
+	require.Equal(t, payload, unsafeHead)
+}
