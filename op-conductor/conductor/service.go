@@ -194,7 +194,7 @@ func (c *OpConductor) initConsensus(ctx context.Context) error {
 		LogStoreNoSync:     c.cfg.RaftLogStoreNoSync,
 		Metrics:            c.metrics,
 	}
-	cons, err := consensus.NewRaftConsensus(c.log, raftConsensusConfig)
+	cons, err := consensus.NewConsensus(c.log, raftConsensusConfig, c.cfg.RaftImplementation, c.cfg.RaftClusterToken)
 	if err != nil {
 		if !errors.Is(err, raft.ErrCantBootstrap) {
 			return errors.Wrap(err, "failed to create raft consensus")

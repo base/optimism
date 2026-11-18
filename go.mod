@@ -59,10 +59,13 @@ require (
 	github.com/schollz/progressbar/v3 v3.18.0
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v2 v2.27.6
-	go.etcd.io/bbolt v1.3.6
+	go.etcd.io/bbolt v1.4.3
+	go.etcd.io/etcd/client/pkg/v3 v3.6.8
+	go.etcd.io/etcd/server/v3 v3.6.8
+	go.etcd.io/raft/v3 v3.6.0
 	go.opentelemetry.io/otel v1.40.0
 	go.opentelemetry.io/otel/trace v1.40.0
-	golang.org/x/crypto v0.44.0
+	golang.org/x/crypto v0.45.0
 	golang.org/x/exp v0.0.0-20241009180824-f66d83c29e7c
 	golang.org/x/mod v0.29.0
 	golang.org/x/oauth2 v0.32.0
@@ -77,12 +80,18 @@ require (
 require (
 	github.com/benbjohnson/immutable v0.4.0 // indirect
 	github.com/coreos/etcd v3.3.27+incompatible // indirect
+	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd v0.0.0-20191104093116-d3cd4ed1dbcf // indirect
 	github.com/coreos/pkg v0.0.0-20220810130054-c7d1c02cb6cf // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/grafana/pyroscope-go v1.2.7 // indirect
 	github.com/grafana/pyroscope-go/godeltaprof v0.1.9 // indirect
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3 // indirect
+	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
+	go.etcd.io/etcd/api/v3 v3.6.8 // indirect
+	go.etcd.io/etcd/pkg/v3 v3.6.8 // indirect
 	golang.org/x/telemetry v0.0.0-20251008203120-078029d740a8 // indirect
 )
 
@@ -276,7 +285,7 @@ require (
 	go.uber.org/fx v1.22.2 // indirect
 	go.uber.org/mock v0.4.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.uber.org/zap v1.27.0 // indirect
+	go.uber.org/zap v1.27.0
 	golang.org/x/image v0.25.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect

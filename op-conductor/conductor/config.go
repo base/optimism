@@ -34,6 +34,12 @@ type Config struct {
 	// RaftServerID is the unique ID for this server used by raft consensus.
 	RaftServerID string
 
+	// RaftImplementation selects the consensus engine (default: hashicorp).
+	RaftImplementation string
+
+	// RaftClusterToken identifies an etcd cluster to its peers and WAL.
+	RaftClusterToken string
+
 	// RaftStorageDir is the directory to store raft data.
 	RaftStorageDir string
 
@@ -124,6 +130,9 @@ func (c *Config) Check() error {
 	if c.RaftStorageDir == "" {
 		return fmt.Errorf("missing raft storage directory")
 	}
+	if err := consensus.CheckRaftImplementation(c.RaftImplementation, c.RaftClusterToken, c.RaftStorageBackend, c.RaftLogStoreNoSync); err != nil {
+		return err
+	}
 	if !consensus.IsValidRaftStorageBackend(c.RaftStorageBackend) {
 		return fmt.Errorf("invalid raft storage backend %q", c.RaftStorageBackend)
 	}
@@ -177,6 +186,8 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*Config, error) {
 		// The consensus server will advertise the address it binds to if this is empty/unspecified.
 		ConsensusAdvertisedAddr: ctx.String(flags.AdvertisedFullAddr.Name),
 
+		RaftImplementation:            ctx.String(flags.RaftImplementation.Name),
+		RaftClusterToken:              ctx.String(flags.RaftClusterToken.Name),
 		RaftBootstrap:                 ctx.Bool(flags.RaftBootstrap.Name),
 		RaftServerID:                  ctx.String(flags.RaftServerID.Name),
 		RaftStorageDir:                ctx.String(flags.RaftStorageDir.Name),

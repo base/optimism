@@ -76,3 +76,13 @@ Whenever there are a disaster situation that you see no route to have 2 healthy 
 4. If no conductor is functioning, call `admin_overrideLeader` json rpc method on the op-node to force it to treat itself as the leader
 5. manually start sequencing on the chosen sequencer
 6. Go back to bootstrap step to re-bootstrap the cluster.
+
+### Starting a fresh etcd/raft cluster
+
+HashiCorp Raft is the default. To use etcd/raft, run the **same backend on every member**. There is no rolling migration, shared disk format, or automatic cutover from a HashiCorp cluster. Do not bootstrap a second conductor against a live sequencer.
+
+1. Choose a unique cluster identifier (e.g. `uuidgen` once). Set `--raft.implementation=etcd --raft.etcd-cluster-token=<identifier>` on all members. This identifier prevents accidental cross-cluster traffic; it is **not authentication**. Restrict access to peer and admin ports to trusted hosts.
+2. Use empty per-member storage, stable server IDs and reachable, stable advertised `host:port` addresses. Start **only the first member** with `--raft.bootstrap`. Start the others without it; add them using the leader's existing membership RPCs. Add a learner, let it catch up, then promote it to a voter. Retire removed IDs; use a new ID and empty directory for a replacement.
+3. On restart keep the directory, ID, cluster identifier and advertised address. The backend recovers its latest matching snapshot and replays the standard etcd WAL. Selecting the other engine on the same directory is rejected. Never delete the WAL or bootstrap a replacement cluster as a restart workaround.
+
+Etcd always syncs the WAL for new log entries and votes; `--raft.log-store-no-sync` is rejected. Leave `--raft.storage.backend` at its default (it configures HashiCorp only). `--raft.heartbeat-timeout` sets the base election timeout, with heartbeats at one tenth that interval. Etcd checks quorum itself; the HashiCorp lease timeout does not apply. The backend checkpoints at `--raft.snapshot-threshold` applied entries or 64 MiB of applied data, whichever comes first, compacting through the checkpoint. Once compacted, it also refreshes checkpoints on membership changes so new voters can join. HashiCorp's snapshot interval and trailing-log settings are not used. Reads of the unsafe head require a quorum, even when a local head is available.

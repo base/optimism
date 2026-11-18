@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -32,6 +33,23 @@ func NewUnsafeHeadTracker(log log.Logger, metrics ConsensusMetrics) *unsafeHeadT
 
 // Apply implements raft.FSM, it applies the latest change (latest unsafe head payload) to FSM.
 func (t *unsafeHeadTracker) Apply(l *raft.Log) interface{} {
+	return t.applyPayload(l.Data)
+}
+
+func decodeUnsafeHead(data []byte) (*eth.ExecutionPayloadEnvelope, error) {
+	if len(data) == 0 {
+		return nil, errors.New("log data is nil or empty")
+	}
+	env := new(eth.ExecutionPayloadEnvelope)
+	if err := env.UnmarshalSSZ(eth.BlockV4, uint32(len(data)), bytes.NewReader(data)); err != nil {
+		if err := env.UnmarshalSSZ(eth.BlockV3, uint32(len(data)), bytes.NewReader(data)); err != nil {
+			return nil, err
+		}
+	}
+	return env, nil
+}
+
+func (t *unsafeHeadTracker) applyPayload(ssz []byte) error {
 	start := time.Now()
 	defer func() {
 		if t.metrics != nil {
@@ -39,17 +57,9 @@ func (t *unsafeHeadTracker) Apply(l *raft.Log) interface{} {
 		}
 	}()
 
-	if len(l.Data) == 0 {
-		return fmt.Errorf("log data is nil or empty")
-	}
-
-	data := &eth.ExecutionPayloadEnvelope{}
-	// There is no good way to know which version, so try both. Start with the most recent version
-	if err := data.UnmarshalSSZ(eth.BlockV4, uint32(len(l.Data)), bytes.NewReader(l.Data)); err != nil {
-		// Try v3 if v4 fails and return an error if v3 fails
-		if err := data.UnmarshalSSZ(eth.BlockV3, uint32(len(l.Data)), bytes.NewReader(l.Data)); err != nil {
-			return err
-		}
+	data, err := decodeUnsafeHead(ssz)
+	if err != nil {
+		return err
 	}
 
 	t.mtx.Lock()
@@ -65,25 +75,24 @@ func (t *unsafeHeadTracker) Apply(l *raft.Log) interface{} {
 // Restore implements raft.FSM, it restores state from snapshot.
 func (t *unsafeHeadTracker) Restore(snapshot io.ReadCloser) error {
 	var buf bytes.Buffer
-	n, err := io.Copy(&buf, snapshot)
+	_, err := io.Copy(&buf, snapshot)
 	snapshot.Close()
 	if err != nil {
 		return fmt.Errorf("error reading snapshot data: %w", err)
 	}
 
-	data := &eth.ExecutionPayloadEnvelope{}
-	// There is no good way to know which version, so try both. Start with the most recent version
-	if err := data.UnmarshalSSZ(eth.BlockV4, uint32(n), bytes.NewReader(buf.Bytes())); err != nil {
-		// Try v3 if v4 fails and return an error if v3 fails
-		if err := data.UnmarshalSSZ(eth.BlockV3, uint32(n), bytes.NewReader(buf.Bytes())); err != nil {
-			return err
-		}
+	data, err := decodeUnsafeHead(buf.Bytes())
+	if err != nil {
+		return err
 	}
+	t.restoreHead(data)
+	return nil
+}
 
+func (t *unsafeHeadTracker) restoreHead(data *eth.ExecutionPayloadEnvelope) {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 	t.unsafeHead = data
-	return nil
 }
 
 // Snapshot implements raft.FSM, it creates a snapshot of the current state.

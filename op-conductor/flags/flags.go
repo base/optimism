@@ -35,6 +35,17 @@ var (
 		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "CONSENSUS_ADVERTISED"),
 		Value:   "",
 	}
+	RaftImplementation = &cli.StringFlag{
+		Name:    "raft.implementation",
+		Value:   "hashicorp",
+		Usage:   "Consensus implementation: hashicorp or etcd (fresh clusters only)",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RAFT_IMPLEMENTATION"),
+	}
+	RaftClusterToken = &cli.StringFlag{
+		Name:    "raft.etcd-cluster-token",
+		Usage:   "Unique identifier shared by the members of one etcd raft cluster (not a credential)",
+		EnvVars: opservice.PrefixEnvVar(EnvVarPrefix, "RAFT_ETCD_CLUSTER_TOKEN"),
+	}
 	RaftBootstrap = &cli.BoolFlag{
 		Name:    "raft.bootstrap",
 		Usage:   "If this node should bootstrap a new raft cluster",
@@ -233,6 +244,8 @@ var optionalFlags = []cli.Flag{
 	AdvertisedFullAddr,
 	Paused,
 	RPCEnableProxy,
+	RaftImplementation,
+	RaftClusterToken,
 	RaftBootstrap,
 	RaftStorageBackend,
 	HealthCheckSafeEnabled,

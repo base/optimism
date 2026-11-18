@@ -121,6 +121,9 @@ func NewRaftConsensus(log log.Logger, cfg *RaftConsensusConfig) (*RaftConsensus,
 	rc.LocalID = raft.ServerID(cfg.ServerID)
 
 	baseDir := filepath.Join(cfg.StorageDir, cfg.ServerID)
+	if _, err := os.Lstat(filepath.Join(baseDir, etcdDir)); !os.IsNotExist(err) {
+		return nil, fmt.Errorf("cannot open etcd raft data directory with HashiCorp raft: %s", baseDir)
+	}
 	if _, err := os.Stat(baseDir); os.IsNotExist(err) {
 		if err := os.MkdirAll(baseDir, 0o755); err != nil {
 			return nil, fmt.Errorf("error creating storage dir: %w", err)
@@ -504,11 +507,8 @@ func (rc *RaftConsensus) CommitUnsafePayloadSSZ(ssz []byte) error {
 	// This mirrors the implicit validation the JSON-RPC path gets from its
 	// json.Unmarshal → MarshalSSZ round-trip and prevents corrupt data from
 	// being replicated to every peer's log store.
-	env := new(eth.ExecutionPayloadEnvelope)
-	if err := env.UnmarshalSSZ(eth.BlockV4, uint32(len(ssz)), bytes.NewReader(ssz)); err != nil {
-		if err := env.UnmarshalSSZ(eth.BlockV3, uint32(len(ssz)), bytes.NewReader(ssz)); err != nil {
-			return fmt.Errorf("invalid ssz payload: %w", err)
-		}
+	if _, err := decodeUnsafeHead(ssz); err != nil {
+		return fmt.Errorf("invalid ssz payload: %w", err)
 	}
 
 	applyStart := time.Now()
