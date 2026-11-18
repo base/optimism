@@ -123,7 +123,7 @@ var (
 	}
 	BatchTypeFlag = &cli.UintFlag{
 		Name:        "batch-type",
-		Usage:       "The batch type. 0 for SingularBatch and 1 for SpanBatch.",
+		Usage:       "The batch type. Only 0 (SingularBatch) is supported; 1 (SpanBatch) is rejected.",
 		Value:       0,
 		EnvVars:     prefixEnvVars("BATCH_TYPE"),
 		DefaultText: "singular",

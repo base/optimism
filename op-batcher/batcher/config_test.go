@@ -92,6 +92,11 @@ func TestBatcherConfig(t *testing.T) {
 			errString: "MaxL1TxSize must be greater than 1",
 		},
 		{
+			name:      "span batch type",
+			override:  func(c *batcher.CLIConfig) { c.BatchType = derive.SpanBatchType },
+			errString: "span batches are not supported",
+		},
+		{
 			name:      "invalid batch type close",
 			override:  func(c *batcher.CLIConfig) { c.BatchType = 2 },
 			errString: "unknown batch type: 2",
