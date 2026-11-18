@@ -33,7 +33,8 @@ func NewUnsafeHeadTracker(log log.Logger, metrics ConsensusMetrics) *unsafeHeadT
 
 // Apply implements raft.FSM, it applies the latest change (latest unsafe head payload) to FSM.
 func (t *unsafeHeadTracker) Apply(l *raft.Log) interface{} {
-	return t.applyPayload(l.Data)
+	_, err := t.applyPayload(l.Data)
+	return err
 }
 
 func decodeUnsafeHead(data []byte) (*eth.ExecutionPayloadEnvelope, error) {
@@ -49,7 +50,7 @@ func decodeUnsafeHead(data []byte) (*eth.ExecutionPayloadEnvelope, error) {
 	return env, nil
 }
 
-func (t *unsafeHeadTracker) applyPayload(ssz []byte) error {
+func (t *unsafeHeadTracker) applyPayload(ssz []byte) (bool, error) {
 	start := time.Now()
 	defer func() {
 		if t.metrics != nil {
@@ -59,7 +60,7 @@ func (t *unsafeHeadTracker) applyPayload(ssz []byte) error {
 
 	data, err := decodeUnsafeHead(ssz)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	t.mtx.Lock()
@@ -67,9 +68,10 @@ func (t *unsafeHeadTracker) applyPayload(ssz []byte) error {
 	t.log.Debug("applying new unsafe head", "number", uint64(data.ExecutionPayload.BlockNumber), "hash", data.ExecutionPayload.BlockHash.Hex())
 	if t.unsafeHead == nil || t.unsafeHead.ExecutionPayload.BlockNumber < data.ExecutionPayload.BlockNumber {
 		t.unsafeHead = data
+		return true, nil
 	}
 
-	return nil
+	return false, nil
 }
 
 // Restore implements raft.FSM, it restores state from snapshot.

@@ -31,7 +31,7 @@ type etcdStore struct {
 
 // openEtcdStore opens only this implementation's WAL. A partial or foreign
 // directory must never silently bootstrap a second cluster.
-func openEtcdStore(base string, identity []byte) (*etcdStore, bool, error) {
+func openEtcdStore(base string, identity []byte, bootstrap bool) (*etcdStore, bool, error) {
 	if err := os.MkdirAll(base, 0700); err != nil {
 		return nil, false, err
 	}
@@ -55,8 +55,12 @@ func openEtcdStore(base string, identity []byte) (*etcdStore, bool, error) {
 		if err = os.Mkdir(s.snapDir, 0700); err != nil {
 			return nil, false, err
 		}
-		s.wal, err = wal.Create(lg, s.walDir, identity)
-		return s, true, err
+		meta := append([]byte{0}, identity...)
+		if bootstrap {
+			meta[0] = 1
+		}
+		s.wal, err = wal.Create(lg, s.walDir, meta)
+		return s, bootstrap, err
 	}
 	valid, err := wal.ValidSnapshotEntries(lg, s.walDir)
 	if err != nil {
@@ -93,7 +97,7 @@ func openEtcdStore(base string, identity []byte) (*etcdStore, bool, error) {
 		_ = s.wal.Close()
 		return nil, false, errors.New("committed index outside recovered log")
 	}
-	if !bytes.Equal(meta, identity) {
+	if len(meta) < 1 || meta[0] > 1 || !bytes.Equal(meta[1:], identity) {
 		err = errors.New("etcd WAL cluster token or member ID mismatch")
 	}
 	if err == nil {
@@ -106,7 +110,9 @@ func openEtcdStore(base string, identity []byte) (*etcdStore, bool, error) {
 		_ = s.wal.Close()
 		return nil, false, err
 	}
-	return s, false, nil
+	// The process may exit after WAL creation but before its first Ready.
+	// Resume only the bootstrap intent recorded on first creation, never a new flag.
+	return s, meta[0] == 1 && marker.Index == 0 && raft.IsEmptyHardState(hs) && len(entries) == 0, nil
 }
 
 func snapshotMarker(s pb.Snapshot) walpb.Snapshot {
@@ -138,13 +144,7 @@ type etcdSnapshot struct {
 
 func (c *etcdConsensus) snapshot(index uint64) error {
 	state := etcdSnapshot{Members: c.members, Removed: c.removed, Version: c.version}
-	if head := c.tracker.UnsafeHead(); head != nil {
-		var b bytes.Buffer
-		if _, err := head.MarshalSSZ(&b); err != nil {
-			return err
-		}
-		state.Head = b.Bytes()
-	}
+	state.Head = c.headSSZ
 	data, err := json.Marshal(state)
 	if err != nil {
 		return err
@@ -193,6 +193,7 @@ func (c *etcdConsensus) restore(s pb.Snapshot) error {
 	c.mu.Lock()
 	c.members, c.removed, c.version = state.Members, state.Removed, state.Version
 	c.tracker.restoreHead(head)
+	c.headSSZ = state.Head
 	c.mu.Unlock()
 	c.conf = s.Metadata.ConfState
 	c.snapIndex = s.Metadata.Index

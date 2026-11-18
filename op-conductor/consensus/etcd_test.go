@@ -3,11 +3,14 @@ package consensus
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -277,4 +280,125 @@ func BenchmarkDurableCommit(b *testing.B) {
 			require.Equal(b, payload, head)
 		})
 	}
+}
+
+func TestMixedEngineMembershipFailsClosed(t *testing.T) {
+	ec := startMember(t, etcdTestConfig(t, "etcd", true))
+	cfg := etcdTestConfig(t, "hashicorp", true)
+	cfg.LeaderLeaseTimeout = 125 * time.Millisecond
+	cfg.SnapshotInterval = time.Minute
+	hc, err := NewConsensus(log.New(), cfg, "hashicorp", "")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, hc.Shutdown()) })
+	waitLeader(t, ec)
+	waitLeader(t, hc)
+	for _, pair := range [][2]Consensus{{ec, hc}, {hc, ec}} {
+		a, b := pair[0], pair[1]
+		require.Error(t, a.AddVoter(b.ServerID(), b.Addr(), 0))
+		members, err := a.ClusterMembership()
+		require.NoError(t, err)
+		require.Len(t, members.Servers, 1)
+		require.NoError(t, a.CommitUnsafePayload(testHead(99)))
+	}
+}
+func TestEtcdInterruptedBootstrap(t *testing.T) {
+	for _, bootstrap := range []bool{true, false} {
+		t.Run(strconv.FormatBool(bootstrap), func(t *testing.T) {
+			cfg := etcdTestConfig(t, "alpha", !bootstrap)
+			identity, err := json.Marshal([]string{cfg.ServerID, "cluster-A"})
+			require.NoError(t, err)
+			store, _, err := openEtcdStore(filepath.Join(cfg.StorageDir, cfg.ServerID), identity, bootstrap)
+			require.NoError(t, err)
+			require.NoError(t, store.wal.Close())
+			c := startMember(t, cfg)
+			if bootstrap {
+				waitLeader(t, c)
+				require.NoError(t, c.CommitUnsafePayload(testHead(1)))
+			} else {
+				require.Never(t, c.Leader, cfg.HeartbeatTimeout*3, 20*time.Millisecond)
+				m, err := c.ClusterMembership()
+				require.NoError(t, err)
+				require.Empty(t, m.Servers)
+			}
+		})
+	}
+}
+func TestEtcdSnapshotKeepsExplicitV4Root(t *testing.T) {
+	cfg := etcdTestConfig(t, "alpha", true)
+	cfg.SnapshotThreshold = 1
+	c := startMember(t, cfg)
+	waitLeader(t, c)
+	expected := testHead(42)
+	sentinel := common.HexToHash("0x1234")
+	expected.ExecutionPayload.WithdrawalsRoot = &sentinel
+	var b bytes.Buffer
+	_, err := expected.MarshalSSZ(&b)
+	require.NoError(t, err)
+	// With empty dynamic fields, the V4 withdrawals root is the last 32 bytes.
+	// Construct the legal explicit empty-root encoding the encoder would omit.
+	require.True(t, bytes.HasSuffix(b.Bytes(), sentinel[:]))
+	copy(b.Bytes()[b.Len()-32:], types.EmptyWithdrawalsHash[:])
+	empty := types.EmptyWithdrawalsHash
+	expected.ExecutionPayload.WithdrawalsRoot = &empty
+	require.NoError(t, c.CommitUnsafePayloadSSZ(b.Bytes()))
+	require.NoError(t, c.Shutdown())
+	c = startMember(t, cfg)
+	waitLeader(t, c)
+	head, err := c.LatestUnsafePayload()
+	require.NoError(t, err)
+	require.Equal(t, expected, head)
+}
+
+type blockingWALMetric struct {
+	armed            atomic.Bool
+	entered, release chan struct{}
+}
+
+func (*blockingWALMetric) RecordCommitDuration(float64, float64) {}
+func (*blockingWALMetric) RecordCommitPayloadSize(float64)       {}
+func (*blockingWALMetric) RecordFSMApplyDuration(float64)        {}
+func (m *blockingWALMetric) RecordLogStoreDuration(float64) {
+	if m.armed.Swap(false) {
+		close(m.entered)
+		<-m.release
+	}
+}
+func TestEtcdStalledPersistenceExpiresLeadership(t *testing.T) {
+	cfg := etcdTestConfig(t, "alpha", true)
+	m := &blockingWALMetric{entered: make(chan struct{}), release: make(chan struct{})}
+	cfg.Metrics = m
+	c := startMember(t, cfg)
+	unblock := sync.OnceFunc(func() { close(m.release) })
+	defer unblock()
+	waitLeader(t, c)
+	select {
+	case leader := <-c.LeaderCh():
+		require.True(t, leader)
+	case <-time.After(time.Second):
+		t.Fatal("no leadership notification")
+	}
+	m.armed.Store(true)
+	result := make(chan error, 1)
+	go func() { result <- c.CommitUnsafePayload(testHead(1)) }()
+	select {
+	case <-m.entered:
+	case <-time.After(time.Second):
+		t.Fatal("WAL path did not block")
+	}
+	select {
+	case leader := <-c.LeaderCh():
+		require.False(t, leader)
+	case <-time.After(time.Second):
+		t.Fatal("stalled leader did not withdraw")
+	}
+	require.False(t, c.Leader())
+	require.Empty(t, c.LeaderWithID().ID)
+	unblock()
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("commit did not finish")
+	}
+	waitLeader(t, c)
 }

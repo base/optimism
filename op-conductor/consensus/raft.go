@@ -100,13 +100,17 @@ func normalizeRaftStorageBackend(backend string) string {
 	return backend
 }
 
-// checkTCPPortOpen attempts to connect to the specified address and returns an error if the connection fails.
-func checkTCPPortOpen(address string) error {
-	conn, err := net.DialTimeout("tcp", address, 5*time.Second)
-	if err != nil {
-		return err
+// Probe the wire protocol before changing quorum. A pre-vote does not change
+// the peer's term or cast a vote. A listening TCP port alone may be etcd/raft.
+func (rc *RaftConsensus) checkPeer(id, addr string) error {
+	req := raft.RequestPreVoteRequest{RPCHeader: raft.RPCHeader{ProtocolVersion: raft.ProtocolVersionMax, ID: []byte(rc.serverID), Addr: []byte(rc.Addr())}}
+	var resp raft.RequestPreVoteResponse
+	if err := rc.transport.RequestPreVote(raft.ServerID(id), raft.ServerAddress(addr), &req, &resp); err != nil {
+		return fmt.Errorf("HashiCorp raft peer probe: %w", err)
 	}
-	defer conn.Close()
+	if string(resp.ID) != id {
+		return fmt.Errorf("expected raft member %q, got %q", id, resp.ID)
+	}
 	return nil
 }
 
@@ -355,7 +359,7 @@ func (rc *RaftConsensus) Addr() string {
 
 // AddNonVoter implements Consensus, it tries to add a non-voting member into the cluster.
 func (rc *RaftConsensus) AddNonVoter(id string, addr string, version uint64) error {
-	if err := checkTCPPortOpen(addr); err != nil {
+	if err := rc.checkPeer(id, addr); err != nil {
 		rc.log.Error("connection test to member addr failed", "id", id, "addr", addr, "err", err)
 		return err
 	}
@@ -368,7 +372,7 @@ func (rc *RaftConsensus) AddNonVoter(id string, addr string, version uint64) err
 
 // AddVoter implements Consensus, it tries to add a voting member into the cluster.
 func (rc *RaftConsensus) AddVoter(id string, addr string, version uint64) error {
-	if err := checkTCPPortOpen(addr); err != nil {
+	if err := rc.checkPeer(id, addr); err != nil {
 		rc.log.Error("connection test to member addr failed", "id", id, "addr", addr, "err", err)
 		return err
 	}
